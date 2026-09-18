@@ -1,0 +1,360 @@
+{{- $version := .Values.cluster.version | default "4.18" }}
+{{- $namespace := .Values.main.namespace | default "self-healing-platform" }}
+{{- $dashboardHost := include "self-healing-platform.dashboardHost" . }}
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: self-healing-workbench
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/component: ai-ml-workbench
+    app: self-healing-workbench
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/odh-managed: "true"
+  annotations:
+    {{- if semverCompare ">=4.20" $version }}
+    notebooks.opendatahub.io/inject-auth: "true"
+    {{- else }}
+    notebooks.opendatahub.io/inject-oauth: "true"
+    notebooks.opendatahub.io/oauth-logout-url: "https://{{ $dashboardHost }}/projects/{{ $namespace }}"
+    {{- end }}
+    opendatahub.io/username: "admin"
+    openshift.io/display-name: "Self-Healing Workbench"
+    argocd.argoproj.io/sync-options: "Prune=false,Replace=false"
+    argocd.argoproj.io/compare-options: |
+      IgnoreDifferences=/spec/template/spec/containers/0/resources,/spec/template/spec/containers/0/env,/spec/template/spec/containers/0/image,/spec/template/spec/volumes
+spec:
+  template:
+    spec:
+      {{- if and .Values.workbench.gpu.enabled (eq ((.Values.cluster).topology | default "ha") "sno") }}
+      {{- /* SNO: GPU and CephFS coexist on the single node, so prefer GPU scheduling */}}
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: nvidia.com/gpu.present
+                operator: In
+                values: ["true"]
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: "True"
+        effect: NoSchedule
+      {{- end }}
+      {{- /* HA: GPU affinity is NOT applied -- workbench needs CephFS which is only on non-GPU nodes */}}
+      # Init container to set up writable Jupyter directories
+      initContainers:
+      - name: setup-jupyter-dirs
+        # Use the same notebook-validator image as validation jobs for consistency
+        # This image is built by Tekton pipeline from notebooks/Dockerfile
+        # Base: pytorch:2025.1 + pre-installed ML packages (statsmodels, prophet, pyod, xgboost, etc.)
+        image: image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Setting up Jupyter directories..."
+
+          # Wait for model storage to be initialized
+          echo "Verifying model storage is ready..."
+          MAX_WAIT=300  # 5 minutes
+          ELAPSED=0
+          INTERVAL=10
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            if [ -f /mnt/models/.initialized ]; then
+              echo "✓ Model storage is initialized and ready"
+              break
+            fi
+            echo "⚠ Model storage not yet initialized, waiting ${INTERVAL}s... (${ELAPSED}s/${MAX_WAIT}s)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          if [ ! -f /mnt/models/.initialized ]; then
+            echo "⚠ WARNING: Model storage not initialized after ${MAX_WAIT}s, continuing anyway..."
+            echo "  Workbench will start but model access may be limited until storage is ready"
+          fi
+
+          # Create writable Jupyter directories
+          mkdir -p /opt/app-root/src/.jupyter/lab/workspaces
+          mkdir -p /opt/app-root/src/.jupyter/lab/user-settings
+          mkdir -p /opt/app-root/src/.jupyter/config
+          mkdir -p /opt/app-root/src/.local/share/jupyter/runtime
+          mkdir -p /opt/app-root/src/.local/share/jupyter/lab/workspaces
+          mkdir -p /opt/app-root/src/.local/share/jupyter/lab/user-settings
+
+          # Copy config from ConfigMap if it exists
+          if [ -d /jupyter-config-ro ]; then
+            echo "Copying Jupyter configuration from ConfigMap..."
+            cp -r /jupyter-config-ro/* /opt/app-root/src/.jupyter/config/ 2>/dev/null || true
+          fi
+
+          echo "✓ Jupyter directories setup complete"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /mnt/models
+        - name: jupyter-config-ro
+          mountPath: /jupyter-config-ro
+          readOnly: true
+        - name: jupyter-home
+          mountPath: /opt/app-root/src/.jupyter
+        - name: jupyter-local
+          mountPath: /opt/app-root/src/.local
+      containers:
+      - name: self-healing-workbench
+        # Use the same notebook-validator image as validation jobs for consistency
+        # This ensures all ML packages are pre-installed (no pip install at runtime)
+        image: image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            {{- if and .Values.workbench.gpu.enabled (eq ((.Values.cluster).topology | default "ha") "sno") }}
+            nvidia.com/gpu: "1"
+            {{- end }}
+        env:
+        {{- if semverCompare ">=4.20" $version }}
+        - name: NOTEBOOK_ARGS
+          value: |-
+            --ServerApp.port=8888
+            --ServerApp.token=''
+            --ServerApp.password=''
+            --ServerApp.base_url=/notebook/{{ $namespace }}/self-healing-workbench
+            --ServerApp.quit_button=False
+        {{- else }}
+        - name: NOTEBOOK_ARGS
+          value: |-
+            --ServerApp.port=8888
+            --ServerApp.token=''
+            --ServerApp.password=''
+            --ServerApp.base_url=/notebook/{{ $namespace }}/self-healing-workbench
+            --ServerApp.quit_button=False
+            --ServerApp.tornado_settings={"user":"admin","hub_host":"https://{{ $dashboardHost }}","hub_prefix":"/projects/{{ $namespace }}"}
+        {{- end }}
+        - name: JUPYTER_IMAGE
+          value: image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest
+        - name: JUPYTER_ENABLE_LAB
+          value: "yes"
+        {{- $gitRepoURL := .Values.git.repoURL | default .Values.global.repoURL | default .Values.global.git.repoURL | default "" }}
+        {{- if $gitRepoURL }}
+        - name: JUPYTER_PRELOAD_REPOS
+          value: {{ $gitRepoURL | quote }}
+        {{- end }}
+        {{- $giteaUrl := (.Values.workbench).giteaUrl | default "" }}
+        {{- if $giteaUrl }}
+        - name: GITEA_ENABLED
+          value: "true"
+        - name: GITEA_URL
+          value: {{ $giteaUrl | quote }}
+        {{- end }}
+        - name: PIP_TRUSTED_HOST
+          value: "pypi.org pypi.python.org files.pythonhosted.org"
+        - name: PROMETHEUS_URL
+          value: "https://prometheus-k8s.openshift-monitoring.svc.cluster.local:9091"
+        {{- if .Values.objectStore.enabled }}
+        - name: AWS_S3_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: model-storage-config
+              key: AWS_S3_ENDPOINT
+        - name: S3_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: model-storage-config
+              key: AWS_S3_BUCKET
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: model-storage-config
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: model-storage-config
+              key: AWS_SECRET_ACCESS_KEY
+        {{- end }}
+        - name: PIP_CERT
+          value: /etc/pki/tls/custom-certs/ca-bundle.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /etc/pki/tls/custom-certs/ca-bundle.crt
+        - name: SSL_CERT_FILE
+          value: /etc/pki/tls/custom-certs/ca-bundle.crt
+        ports:
+        - containerPort: 8888
+          name: notebook-port
+          protocol: TCP
+        {{- $probePath := printf "/notebook/%s/self-healing-workbench/api" $namespace }}
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: {{ $probePath }}
+            port: notebook-port
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: {{ $probePath }}
+            port: notebook-port
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        startupProbe:
+          httpGet:
+            path: {{ $probePath }}
+            port: notebook-port
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 30
+        volumeMounts:
+        - name: data-volume
+          mountPath: /opt/app-root/src/data
+        # Model storage PVC - shared with KServe InferenceServices
+        - name: model-storage
+          mountPath: /mnt/models
+        # Model artifacts also accessible via S3 (for backwards compatibility)
+        # Use AWS_* environment variables from model-storage-config secret
+        # Example: aws s3 cp model.pkl s3://model-storage/mymodel/
+        - name: jupyter-home
+          mountPath: /opt/app-root/src/.jupyter
+        - name: jupyter-local
+          mountPath: /opt/app-root/src/.local
+        - mountPath: /dev/shm
+          name: shm
+        - mountPath: /etc/pki/tls/custom-certs/ca-bundle.crt
+          name: trusted-ca
+          readOnly: true
+          subPath: ca-bundle.crt
+        workingDir: /opt/app-root/src
+      # Auth is handled by the ODH notebook controller:
+      # RHOAI 3.x (inject-auth): kube-rbac-proxy sidecar + HTTPRoute
+      # RHOAI 2.x (inject-oauth): oauth-proxy sidecar
+      serviceAccountName: self-healing-workbench
+      enableServiceLinks: false
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: {{ printf "workbench-data-%s" (regexFind "[a-z]+" (.Values.metadata.environment | default "development")) }}
+      # Model storage PVC - shared with KServe InferenceServices
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-storage-pvc
+      # Model artifacts also accessible via S3/NooBaa (for backwards compatibility)
+      # - Credentials available via model-storage-config secret (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_ENDPOINT)
+      # - Users can read/write models directly to S3 buckets: model-storage, training-data, inference-results
+      # Read-only ConfigMap for Jupyter configuration
+      - name: jupyter-config-ro
+        configMap:
+          name: jupyter-config
+          defaultMode: 0444
+      # Writable emptyDir volumes for Jupyter directories
+      - name: jupyter-home
+        emptyDir: {}
+      - name: jupyter-local
+        emptyDir: {}
+      - emptyDir:
+          medium: Memory
+        name: shm
+      - configMap:
+          items:
+          - key: ca-bundle.crt
+            path: ca-bundle.crt
+          name: workbench-trusted-ca-bundle
+          optional: true
+        name: trusted-ca
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jupyter-config
+  labels:
+    app.kubernetes.io/component: ai-ml-workbench
+data:
+  jupyter_server_config.py: |
+    # Jupyter server configuration for Self-Healing Platform
+    import os
+
+    # Basic server configuration
+    c.ServerApp.ip = '0.0.0.0'
+    c.ServerApp.port = 8888
+    c.ServerApp.open_browser = False
+    c.ServerApp.allow_root = True
+    c.ServerApp.token = ''
+    c.ServerApp.password = ''
+    c.ServerApp.disable_check_xsrf = True
+
+    # Handle base URL from NB_PREFIX environment variable
+    nb_prefix = os.environ.get('NB_PREFIX', '')
+    if nb_prefix:
+        c.ServerApp.base_url = nb_prefix
+        c.ServerApp.default_url = f'{nb_prefix}/lab'
+    else:
+        c.ServerApp.default_url = '/lab'
+
+    # Enable JupyterLab by default
+    c.LabApp.default_url = '/lab'
+
+    # Set default kernel
+    c.MultiKernelManager.default_kernel_name = 'python3'
+
+    # Trust notebooks by default
+    c.ServerApp.trust_xheaders = True
+
+    # Configure writable directories
+    c.ServerApp.runtime_dir = '/opt/app-root/src/.local/share/jupyter/runtime'
+    c.LabApp.workspaces_dir = '/opt/app-root/src/.local/share/jupyter/lab/workspaces'
+    c.LabApp.user_settings_dir = '/opt/app-root/src/.local/share/jupyter/lab/user-settings'
+
+  requirements.txt: |
+    # Self-Healing Platform Specific Libraries
+    # Note: PyTorch base image already includes: torch, numpy, pandas, scikit-learn, matplotlib
+
+    # Time Series Analysis for Anomaly Detection
+    statsmodels>=0.14.0
+    prophet>=1.1.4
+    tslearn>=0.6.0
+
+    # Advanced Anomaly Detection
+    pyod>=1.1.0
+    isolation-forest>=0.1.0
+
+    # Additional ML Libraries (not in PyTorch base)
+    xgboost>=2.0.0
+    lightgbm>=4.0.0
+
+    # Monitoring and Platform Integration
+    prometheus-client>=0.17.0
+    kubernetes>=28.0.0
+
+    # Model Serving Integration
+    kserve>=0.11.0
+
+    # Enhanced Visualization
+    seaborn>=0.12.0
+    plotly>=5.17.0
+    bokeh>=3.0.0
+
+    # Self-Healing Specific Tools
+    networkx>=3.0  # For dependency graph analysis
+    pyyaml>=6.0    # For configuration management
+    requests>=2.31.0  # For API integration
+
+    # Jupyter Extensions and Tools
+    jupyter-prometheus-exporter>=0.2.0
+    ipywidgets>=8.0.0
+    jupyterlab-git>=0.44.0

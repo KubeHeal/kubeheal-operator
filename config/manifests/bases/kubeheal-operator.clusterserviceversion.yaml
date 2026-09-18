@@ -1,0 +1,90 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Basic Install
+    categories: AI/Machine Learning,Monitoring
+    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.0
+    repository: https://github.com/KubeHeal/kubeheal-operator
+    support: KubeHeal Community
+  name: kubeheal-operator.v0.1.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: Deploys and manages the KubeHeal AIOps Self-Healing Platform
+      displayName: Self-Healing Platform
+      kind: SelfHealingPlatform
+      name: selfhealingplatforms.aiops.kubeheal.io
+      version: v1alpha1
+  description: |
+    ## KubeHeal AIOps Self-Healing Platform
+
+    KubeHeal is the first open-source AIOps self-healing operator for Kubernetes and OpenShift.
+    It combines ML-based anomaly detection with automated multi-layer remediation,
+    orchestrated by a coordination engine that bridges deterministic automation and AI analysis.
+
+    ### Features
+
+    * **ML-Powered Anomaly Detection** — Isolation Forest and LSTM models detect cluster anomalies
+    * **Multi-Layer Remediation** — Coordination engine orchestrates node, application, and ML-driven healing
+    * **Natural Language Interface** — MCP server enables AI assistants to query cluster health
+    * **Model Serving** — KServe-based model serving for anomaly detection and predictive analytics
+    * **OpenShift Native** — Built on RHOAI, Tekton, ArgoCD, ODF, and KServe
+    * **Topology Aware** — Supports both HA and SNO (Single Node OpenShift) deployments
+
+    ### Quick Start
+
+    1. Install the operator from OperatorHub
+    2. Create a `SelfHealingPlatform` custom resource
+    3. The operator deploys all platform components automatically
+
+    ### Prerequisites
+
+    The following operators must be installed before deploying:
+
+    * Red Hat OpenShift AI (RHOAI)
+    * OpenShift Data Foundation (ODF)
+    * OpenShift Pipelines (Tekton)
+    * External Secrets Operator
+  displayName: KubeHeal AIOps Self-Healing Platform
+  icon:
+  - base64data: ""
+    mediatype: image/png
+  install:
+    spec:
+      deployments: []
+    strategy: deployment
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - aiops
+  - self-healing
+  - anomaly-detection
+  - machine-learning
+  - openshift
+  - kubernetes
+  - remediation
+  links:
+  - name: Documentation
+    url: https://github.com/KubeHeal/openshift-aiops-platform
+  - name: Source Code
+    url: https://github.com/KubeHeal/kubeheal-operator
+  maintainers:
+  - email: tosin@kubeheal.io
+    name: Platform Team
+  maturity: alpha
+  minKubeVersion: 1.27.0
+  provider:
+    name: KubeHeal
+    url: https://github.com/KubeHeal
+  version: 0.1.0

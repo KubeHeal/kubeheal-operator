@@ -1,0 +1,235 @@
+{{- if and .Values.notebooks .Values.notebooks.validation .Values.notebooks.validation.enabled }}
+{{- /* Resolve git URL with fallback chain */ -}}
+{{- $gitUrl := .Values.notebooks.validation.git.url | default .Values.git.repoURL | default .Values.global.repoURL | default .Values.global.git.repoURL | default "" }}
+{{- $gitRef := .Values.notebooks.validation.git.ref | default .Values.git.revision | default .Values.global.targetRevision | default .Values.global.git.revision | default "main" }}
+---
+# Notebook Validator Image Build
+# ==============================
+# This template creates:
+# 1. ImageStream: notebook-validator (stores built image)
+# 2. BuildConfig: notebook-validator (builds from notebooks/Dockerfile)
+# 3. Job: wait-for-notebook-validator-image (blocks ArgoCD until image ready)
+#
+# Build Triggers:
+# - ConfigChange: Automatic rebuild when Helm chart syncs
+# - Generic Webhook: Manual/automated rebuild via webhook URL
+#
+# To set up GitHub webhook (for auto-rebuild on git push):
+# 1. Create webhook secret:
+#    oc create secret generic notebook-validator-webhook-secret \
+#      --from-literal=WebHookSecretKey=$(openssl rand -hex 20) \
+#      -n self-healing-platform
+#
+# 2. Get webhook URL:
+#    oc describe bc notebook-validator -n self-healing-platform | grep "webhook"
+#
+# 3. Configure in GitHub:
+#    - Repository > Settings > Webhooks > Add webhook
+#    - Payload URL: <webhook URL from step 2>
+#    - Content type: application/json
+#    - Secret: <value from step 1>
+#    - Events: Just the push event
+#    - Path filter (optional): notebooks/**
+#
+# Related: ADR-027 (CI/CD Pipeline Automation), ADR-031 (Dockerfile Strategy)
+---
+# ImageStream for notebook-validator
+# Stores the built image with all ML packages pre-installed
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: notebook-validator
+  namespace: {{ .Values.main.namespace }}
+  labels:
+    app.kubernetes.io/name: notebook-validator
+    app.kubernetes.io/component: notebook-validation
+    app.kubernetes.io/part-of: self-healing-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  lookupPolicy:
+    local: true
+
+{{- if $gitUrl }}
+---
+# BuildConfig for notebook-validator image
+# Uses Docker strategy to build from RHOAI pytorch base image
+# ArgoCD handles BuildConfigs natively (unlike PipelineRuns which are excluded)
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: notebook-validator
+  namespace: {{ .Values.main.namespace }}
+  labels:
+    app.kubernetes.io/name: notebook-validator
+    app.kubernetes.io/component: notebook-validation
+    app.kubernetes.io/part-of: self-healing-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+    # Ensure ArgoCD waits for initial build to complete
+    argocd.argoproj.io/sync-options: "SkipDryRunOnMissingResource=true"
+    # Track the Build resources created by this BuildConfig
+    argocd.argoproj.io/compare-options: "IncludeMutationWebhook=true"
+    description: |
+      Builds the notebook-validator image with all ML packages pre-installed.
+      Base: RHOAI pytorch:2025.1 (RHEL 9, enterprise supported)
+      Adds: statsmodels, prophet, pyod, xgboost, lightgbm, seaborn, kserve
+spec:
+  source:
+    type: Git
+    git:
+      uri: {{ $gitUrl }}
+      ref: {{ $gitRef }}
+    contextDir: notebooks
+    {{- if .Values.gitea.enabled }}
+    sourceSecret:
+      name: git-credentials
+    {{- end }}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      # Don't pull base image every time - use cached version if available
+      forcePull: false
+  output:
+    to:
+      kind: ImageStreamTag
+      name: notebook-validator:latest
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
+  # Build completion timeout (building pytorch base can take a while)
+  completionDeadlineSeconds: 3600
+  # Triggers:
+  # - ConfigChange: Rebuild when BuildConfig changes (Helm update, sync)
+  # - Generic webhook: Rebuild when triggered via webhook URL (GitHub, manual)
+  triggers:
+    - type: ConfigChange
+    - type: Generic
+      generic:
+        secret: notebook-validator-webhook-secret  # pragma: allowlist secret
+        allowEnv: true
+
+---
+# Job to wait for notebook-validator image to be built
+#
+# GitOps Integration: This job ensures the Build resource (notebook-validator-1-build)
+# completes before ArgoCD proceeds to higher sync waves. By blocking at sync-wave -3,
+# this guarantees that:
+# - The notebook-validator:latest image exists in the ImageStream
+# - All dependent resources (NotebookValidationJobs, workbench) can reference the image
+# - Build failures are caught during ArgoCD sync, not during runtime
+#
+# Without this job, ArgoCD would consider the BuildConfig "synced" even if the Build
+# hasn't started or completed, causing dependent pods to fail with ImagePullBackOff
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wait-for-notebook-validator-image
+  namespace: {{ .Values.main.namespace }}
+  labels:
+    app.kubernetes.io/name: notebook-validator
+    app.kubernetes.io/component: notebook-validation
+    app.kubernetes.io/part-of: self-healing-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/sync-options: "Prune=false"
+    description: "Waits for notebook-validator image build to complete"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600  # 1 hour - allows inspection of completed/failed jobs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wait-for-notebook-validator-image
+        app.kubernetes.io/component: notebook-validation
+    spec:
+      serviceAccountName: self-healing-operator
+      restartPolicy: Never
+      containers:
+      - name: wait-for-image
+        image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "==========================================="
+          echo "Waiting for notebook-validator image"
+          echo "==========================================="
+
+          NAMESPACE="{{ .Values.main.namespace }}"
+          IMAGE_TAG="notebook-validator:latest"
+          TIMEOUT=3600  # 1 hour timeout for build
+          INTERVAL=30
+          ELAPSED=0
+
+          # Check if image already exists
+          if oc get imagestreamtag "$IMAGE_TAG" -n "$NAMESPACE" &>/dev/null; then
+            echo "✅ Image $IMAGE_TAG already exists"
+            exit 0
+          fi
+
+          # Check if any build exists, trigger if not
+          if ! oc get builds -n "$NAMESPACE" -l buildconfig=notebook-validator 2>/dev/null | grep -q .; then
+            echo "⚠️  No builds found, triggering new build..."
+            if oc start-build notebook-validator -n "$NAMESPACE"; then
+              echo "✅ Build triggered successfully"
+            else
+              echo "❌ Failed to trigger build"
+              exit 1
+            fi
+          fi
+
+          echo "Image not found, waiting for build to complete..."
+          echo "Timeout: ${TIMEOUT}s"
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            # Check if image exists
+            if oc get imagestreamtag "$IMAGE_TAG" -n "$NAMESPACE" &>/dev/null; then
+              echo "✅ Image $IMAGE_TAG is now available!"
+              exit 0
+            fi
+
+            # Check build status
+            BUILD_STATUS=$(oc get builds -n "$NAMESPACE" -l buildconfig=notebook-validator --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].status.phase}' 2>/dev/null || echo "Unknown")
+
+            case $BUILD_STATUS in
+              Complete)
+                echo "Build completed, verifying image..."
+                sleep 5
+                if oc get imagestreamtag "$IMAGE_TAG" -n "$NAMESPACE" &>/dev/null; then
+                  echo "✅ Image $IMAGE_TAG is now available!"
+                  exit 0
+                fi
+                ;;
+              Failed|Error|Cancelled)
+                echo "❌ Build failed with status: $BUILD_STATUS"
+                oc get builds -n "$NAMESPACE" -l buildconfig=notebook-validator --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].status.message}' 2>/dev/null || true
+                exit 1
+                ;;
+              Running|Pending|New|*)
+                echo "Build status: $BUILD_STATUS (elapsed: ${ELAPSED}s/${TIMEOUT}s)"
+                ;;
+            esac
+
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "❌ Timeout waiting for image after ${TIMEOUT}s"
+          exit 1
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+{{- end }}{{/* end if $gitUrl */}}
+
+{{- end }}

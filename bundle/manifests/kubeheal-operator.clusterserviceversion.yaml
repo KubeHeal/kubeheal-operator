@@ -1,0 +1,456 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "aiops.kubeheal.io/v1alpha1",
+          "kind": "SelfHealingPlatform",
+          "metadata": {
+            "name": "kubeheal",
+            "namespace": "self-healing-platform"
+          },
+          "spec": {
+            "cluster": {
+              "topology": "ha",
+              "version": "4.22"
+            },
+            "coordinationEngine": {
+              "enabled": true,
+              "image": {
+                "pullPolicy": "Always",
+                "repository": "quay.io/takinosh/openshift-coordination-engine"
+              },
+              "logLevel": "info",
+              "replicas": 1
+            },
+            "features": {
+              "aiml": true
+            },
+            "global": {
+              "git": {
+                "repoURL": "https://github.com/KubeHeal/openshift-aiops-platform.git",
+                "revision": "main"
+              },
+              "imagePullPolicy": "IfNotPresent",
+              "namespace": "self-healing-platform",
+              "pattern": "self-healing-platform",
+              "version": "1.0.0"
+            },
+            "mcpServer": {
+              "enabled": true,
+              "image": {
+                "pullPolicy": "Always",
+                "repository": "quay.io/takinosh/openshift-cluster-health-mcp"
+              },
+              "replicas": 1
+            },
+            "modelServing": {
+              "enabled": true
+            },
+            "models": [
+              {
+                "cpu": "500m",
+                "cpuLimit": "1",
+                "gpuTrained": false,
+                "memory": "512Mi",
+                "memoryLimit": "1Gi",
+                "name": "anomaly-detector"
+              },
+              {
+                "cpu": "500m",
+                "cpuLimit": "2",
+                "gpuTrained": true,
+                "memory": "1Gi",
+                "memoryLimit": "2Gi",
+                "name": "predictive-analytics"
+              }
+            ],
+            "monitoring": {
+              "enabled": true
+            },
+            "notebooks": {
+              "validation": {
+                "enabled": true
+              }
+            },
+            "objectStore": {
+              "enabled": true
+            },
+            "storage": {
+              "modelStorage": {
+                "size": "10Gi"
+              },
+              "workbenchData": {
+                "size": "20Gi",
+                "storageClass": "gp3-csi"
+              }
+            },
+            "tekton": {
+              "enabled": true
+            },
+            "workbench": {
+              "enabled": true
+            }
+          }
+        }
+      ]
+    capabilities: Basic Install
+    categories: AI/Machine Learning,Monitoring
+    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.0
+    createdAt: "2026-09-18T19:58:13Z"
+    operators.operatorframework.io/builder: operator-sdk-v1.42.3
+    operators.operatorframework.io/project_layout: helm.sdk.operatorframework.io/v1
+    repository: https://github.com/KubeHeal/kubeheal-operator
+    support: KubeHeal Community
+  name: kubeheal-operator.v0.1.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: Deploys and manages the KubeHeal AIOps Self-Healing Platform
+      displayName: Self-Healing Platform
+      kind: SelfHealingPlatform
+      name: selfhealingplatforms.aiops.kubeheal.io
+      version: v1alpha1
+  description: |
+    ## KubeHeal AIOps Self-Healing Platform
+
+    KubeHeal is the first open-source AIOps self-healing operator for Kubernetes and OpenShift.
+    It combines ML-based anomaly detection with automated multi-layer remediation,
+    orchestrated by a coordination engine that bridges deterministic automation and AI analysis.
+
+    ### Features
+
+    * **ML-Powered Anomaly Detection** — Isolation Forest and LSTM models detect cluster anomalies
+    * **Multi-Layer Remediation** — Coordination engine orchestrates node, application, and ML-driven healing
+    * **Natural Language Interface** — MCP server enables AI assistants to query cluster health
+    * **Model Serving** — KServe-based model serving for anomaly detection and predictive analytics
+    * **OpenShift Native** — Built on RHOAI, Tekton, ArgoCD, ODF, and KServe
+    * **Topology Aware** — Supports both HA and SNO (Single Node OpenShift) deployments
+
+    ### Quick Start
+
+    1. Install the operator from OperatorHub
+    2. Create a `SelfHealingPlatform` custom resource
+    3. The operator deploys all platform components automatically
+
+    ### Prerequisites
+
+    The following operators must be installed before deploying:
+
+    * Red Hat OpenShift AI (RHOAI)
+    * OpenShift Data Foundation (ODF)
+    * OpenShift Pipelines (Tekton)
+    * External Secrets Operator
+  displayName: KubeHeal AIOps Self-Healing Platform
+  icon:
+  - base64data: ""
+    mediatype: image/png
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - secrets
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+        - apiGroups:
+          - aiops.kubeheal.io
+          resources:
+          - selfhealingplatforms
+          - selfhealingplatforms/status
+          - selfhealingplatforms/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - endpoints
+          - persistentvolumeclaims
+          - pods
+          - serviceaccounts
+          - services
+          verbs:
+          - '*'
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          - statefulsets
+          verbs:
+          - '*'
+        - apiGroups:
+          - batch
+          resources:
+          - jobs
+          - cronjobs
+          verbs:
+          - '*'
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - roles
+          - rolebindings
+          - clusterroles
+          - clusterrolebindings
+          verbs:
+          - '*'
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routes
+          - routes/custom-host
+          verbs:
+          - '*'
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferenceservices
+          - servingruntimes
+          verbs:
+          - '*'
+        - apiGroups:
+          - tekton.dev
+          resources:
+          - pipelines
+          - tasks
+          - pipelineruns
+          - taskruns
+          verbs:
+          - '*'
+        - apiGroups:
+          - noobaa.io
+          resources:
+          - bucketclasses
+          verbs:
+          - '*'
+        - apiGroups:
+          - objectbucket.io
+          resources:
+          - objectbucketclaims
+          verbs:
+          - '*'
+        - apiGroups:
+          - external-secrets.io
+          resources:
+          - externalsecrets
+          - secretstores
+          - clustersecretstores
+          verbs:
+          - '*'
+        - apiGroups:
+          - operator.external-secrets.io
+          resources:
+          - externalsecretsconfigs
+          verbs:
+          - '*'
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - subscriptions
+          - operatorgroups
+          verbs:
+          - '*'
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          - prometheusrules
+          verbs:
+          - '*'
+        - apiGroups:
+          - kubeflow.org
+          resources:
+          - notebooks
+          verbs:
+          - '*'
+        - apiGroups:
+          - build.openshift.io
+          resources:
+          - buildconfigs
+          - builds
+          verbs:
+          - '*'
+        - apiGroups:
+          - image.openshift.io
+          resources:
+          - imagestreams
+          - imagestreamtags
+          verbs:
+          - '*'
+        - apiGroups:
+          - kubeheal.io
+          resources:
+          - notebookvalidationjobs
+          verbs:
+          - '*'
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: kubeheal-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: kubeheal-operator
+          control-plane: controller-manager
+        name: kubeheal-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: kubeheal-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: kubeheal-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-require-rbac
+                - --metrics-secure
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --leader-election-id=kubeheal-operator
+                - --health-probe-bind-address=:8081
+                image: quay.io/takinosh/kubeheal-operator:v0.1.0
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: kubeheal-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: kubeheal-operator-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - aiops
+  - self-healing
+  - anomaly-detection
+  - machine-learning
+  - openshift
+  - kubernetes
+  - remediation
+  links:
+  - name: Documentation
+    url: https://github.com/KubeHeal/openshift-aiops-platform
+  - name: Source Code
+    url: https://github.com/KubeHeal/kubeheal-operator
+  maintainers:
+  - email: tosin@kubeheal.io
+    name: Platform Team
+  maturity: alpha
+  minKubeVersion: 1.27.0
+  provider:
+    name: KubeHeal
+    url: https://github.com/KubeHeal
+  version: 0.1.0

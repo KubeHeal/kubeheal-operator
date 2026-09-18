@@ -1,0 +1,59 @@
+{{- range .Values.models }}
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.main.namespace }}
+  labels:
+    app.kubernetes.io/component: model-serving
+  annotations:
+    serving.kserve.io/deploymentMode: "RawDeployment"  # Changed from Serverless for stability
+    argocd.argoproj.io/sync-wave: {{ .syncWave | default "2" | quote }}
+    # Skip health check - models may not exist on first deploy
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  predictor:
+    containers:
+    - name: kserve-container  # Must be named kserve-container for webhook compatibility
+      # Use custom sklearn-xgboost-server image with XGBoost support
+      image: {{ $.Values.modelServing.sklearn.image | default "kserve/sklearnserver:latest" }}
+      args:
+      - --model_name={{ .name }}  # ⭐ Automatically set from model name - prevents default "model" registration
+      - --model_dir=/mnt/models/{{ .name }}
+      - --http_port=8080
+      env:
+      - name: LOG_LEVEL
+        value: INFO
+      volumeMounts:
+      - name: model-storage
+        mountPath: /mnt/models
+      resources:
+        requests:
+          cpu: {{ .cpu | quote }}
+          memory: {{ .memory | quote }}
+        limits:
+          cpu: {{ .cpuLimit | default "2" | quote }}
+          memory: {{ .memoryLimit | default "4Gi" | quote }}
+          # No GPU - sklearn runtime is CPU-only
+    volumes:
+    - name: model-storage
+      persistentVolumeClaim:
+        claimName: model-storage-pvc
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-serving-metrics
+  namespace: {{ .Values.main.namespace }}
+  labels:
+    app.kubernetes.io/component: model-serving
+spec:
+  selector:
+    serving.kserve.io/inferenceservice: anomaly-detector
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP

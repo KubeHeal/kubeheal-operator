@@ -1,0 +1,209 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+##
+## Base operator rules
+##
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - "*"
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+
+##
+## Rules for aiops.kubeheal.io/v1alpha1, Kind: SelfHealingPlatform
+##
+- apiGroups:
+  - aiops.kubeheal.io
+  resources:
+  - selfhealingplatforms
+  - selfhealingplatforms/status
+  - selfhealingplatforms/finalizers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+##
+## Rules for resources created by the Helm chart
+##
+
+# Core resources
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - endpoints
+  - persistentvolumeclaims
+  - pods
+  - serviceaccounts
+  - services
+  verbs:
+  - "*"
+
+# Apps
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - "*"
+
+# Batch (Jobs, CronJobs)
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  - cronjobs
+  verbs:
+  - "*"
+
+# RBAC
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  - clusterroles
+  - clusterrolebindings
+  verbs:
+  - "*"
+
+# OpenShift Routes
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  - routes/custom-host
+  verbs:
+  - "*"
+
+# KServe
+- apiGroups:
+  - serving.kserve.io
+  resources:
+  - inferenceservices
+  - servingruntimes
+  verbs:
+  - "*"
+
+# Tekton
+- apiGroups:
+  - tekton.dev
+  resources:
+  - pipelines
+  - tasks
+  - pipelineruns
+  - taskruns
+  verbs:
+  - "*"
+
+# NooBaa / ODF
+- apiGroups:
+  - noobaa.io
+  resources:
+  - bucketclasses
+  verbs:
+  - "*"
+- apiGroups:
+  - objectbucket.io
+  resources:
+  - objectbucketclaims
+  verbs:
+  - "*"
+
+# External Secrets
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  - secretstores
+  - clustersecretstores
+  verbs:
+  - "*"
+- apiGroups:
+  - operator.external-secrets.io
+  resources:
+  - externalsecretsconfigs
+  verbs:
+  - "*"
+
+# OLM (for operator subscriptions managed by the chart)
+- apiGroups:
+  - operators.coreos.com
+  resources:
+  - subscriptions
+  - operatorgroups
+  verbs:
+  - "*"
+
+# Monitoring
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  - prometheusrules
+  verbs:
+  - "*"
+
+# RHOAI / Kubeflow (Jupyter workbench)
+- apiGroups:
+  - kubeflow.org
+  resources:
+  - notebooks
+  verbs:
+  - "*"
+
+# OpenShift Build
+- apiGroups:
+  - build.openshift.io
+  resources:
+  - buildconfigs
+  - builds
+  verbs:
+  - "*"
+
+# OpenShift ImageStreams
+- apiGroups:
+  - image.openshift.io
+  resources:
+  - imagestreams
+  - imagestreamtags
+  verbs:
+  - "*"
+
+# Jupyter Notebook Validator
+- apiGroups:
+  - kubeheal.io
+  resources:
+  - notebookvalidationjobs
+  verbs:
+  - "*"
+
+# +kubebuilder:scaffold:rules

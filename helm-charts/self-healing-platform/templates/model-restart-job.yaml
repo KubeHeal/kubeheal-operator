@@ -1,0 +1,309 @@
+{{- if and .Values.modelServing.enabled .Values.models }}
+{{- /*
+  Post-Training Restart Job for InferenceService Predictors
+
+  Purpose: Fixes race condition where predictor pods start (wave 2) before
+           models are trained and written to PVC (wave 3+).
+
+  Issue: KServe sklearn server loads models only at startup and does not retry.
+         Predictors report Ready: True even when models are missing, causing
+         ModelMissingError on inference requests.
+
+  Solution: This job runs at sync-wave 11 (after all notebook validation jobs
+            complete at waves 0-10) and:
+            1. Waits for model.pkl files to exist on PVC
+            2. Restarts predictor deployments to trigger model reload
+            3. Validates pods reach Running state after restart
+
+  Sync Wave Timeline:
+    wave 2:  InferenceServices created (predictors start, no models yet)
+    wave 3:  isolation-forest + predictive-analytics-kserve notebooks train models
+    wave 4-10: remaining notebooks
+    wave 11: This restart Job -- restarts predictors so they reload models
+
+  Reference: Issue #34, ADR-054
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-restart-after-training
+  namespace: {{ .Values.main.namespace }}
+  labels:
+    app.kubernetes.io/component: model-serving
+    app.kubernetes.io/name: model-restart-job
+    app.kubernetes.io/part-of: self-healing-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+    description: "Waits for trained models to exist, then restarts InferenceService predictor pods. Not a sync hook -- failure does not block ArgoCD sync."
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: model-serving
+        app.kubernetes.io/name: model-restart-job
+    spec:
+      serviceAccountName: self-healing-operator
+      restartPolicy: OnFailure
+      # No securityContext — let OpenShift SCC assign UID/GID from namespace range.
+      # The namespace range is [1000960000, 1000969999]; hardcoding any value
+      # outside that range causes "forbidden: unable to validate against any SCC".
+      initContainers:
+      # Wait for final PVC to be mounted (required)
+      - name: wait-for-pvcs
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Waiting for final PVC to be mounted..."
+          MAX_WAIT=60  # 1 minute
+          ELAPSED=0
+          INTERVAL=10
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            if [ -d /mnt/models ]; then
+              echo "✓ Final PVC (model-storage-pvc) is mounted successfully!"
+              break
+            fi
+            echo "Final PVC not yet available, waiting ${INTERVAL}s... (${ELAPSED}s/${MAX_WAIT}s)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          if [ ! -d /mnt/models ]; then
+            echo "ERROR: Final PVC did not become available within ${MAX_WAIT}s"
+            exit 1
+          fi
+
+          echo "✓ Final PVC is ready"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /mnt/models
+      containers:
+      - name: restart-predictors
+        image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          NAMESPACE="{{ .Values.main.namespace }}"
+          MAX_WAIT_PER_MODEL=30  # Brief check only; Tekton pipeline handles full wait
+          POLL_INTERVAL=10
+          RESTART_TIMEOUT=120  # 2 minutes for pod restart
+
+          echo "=========================================="
+          echo "Restart Predictors After Models Ready"
+          echo "=========================================="
+          echo "Namespace: $NAMESPACE"
+          echo "Max wait per model: ${MAX_WAIT_PER_MODEL}s"
+          echo "Poll interval: ${POLL_INTERVAL}s"
+          echo "=========================================="
+
+          # Function to copy model from GPU PVC to final PVC (if needed)
+          # GPU PVC (gp3-csi, RWO) may not be mountable if another pod still holds it.
+          # This is best-effort: if the GPU PVC is not available, we rely on models
+          # already present in the final PVC from previous training runs.
+          copy_model_from_gpu() {
+            local model_name=$1
+            local is_gpu_trained=${2:-false}
+            local gpu_path="/mnt/models-gpu/${model_name}/model.pkl"
+            local final_path="/mnt/models/${model_name}/model.pkl"
+            local final_dir="/mnt/models/${model_name}"
+
+            # Check if GPU PVC is available and has model
+            if [ ! -d /mnt/models-gpu ]; then
+              if [ "$is_gpu_trained" = "true" ]; then
+                echo "✗ ERROR: GPU PVC not mounted but model $model_name requires GPU training"
+                return 1
+              fi
+              echo "ℹ️  GPU PVC not mounted (RWO may still be held by training pod)"
+              return 0
+            fi
+
+            if [ ! -f "$gpu_path" ]; then
+              if [ "$is_gpu_trained" = "true" ]; then
+                echo "✗ ERROR: Model not found in GPU PVC: $gpu_path (expected for GPU-trained model)"
+                return 1
+              fi
+              echo "ℹ️  Model not found in GPU PVC (not GPU-trained)"
+              return 0
+            fi
+
+            local gpu_size=$(stat -c%s "$gpu_path" 2>/dev/null || echo "0")
+
+            # Compare with existing model in final PVC (if any)
+            if [ -f "$final_path" ]; then
+              local final_size=$(stat -c%s "$final_path" 2>/dev/null || echo "0")
+              local gpu_mtime=$(stat -c%Y "$gpu_path" 2>/dev/null || echo "0")
+              local final_mtime=$(stat -c%Y "$final_path" 2>/dev/null || echo "0")
+
+              if [ "$gpu_mtime" -le "$final_mtime" ] && [ "$gpu_size" -eq "$final_size" ]; then
+                echo "ℹ️  Final PVC model is up-to-date (same size, same or newer timestamp)"
+                return 0
+              fi
+              echo "🔄 GPU PVC has a newer model — overwriting final PVC..."
+              echo "   GPU model:   size=$gpu_size, mtime=$gpu_mtime"
+              echo "   Final model: size=$final_size, mtime=$final_mtime"
+            else
+              echo "🔄 Copying model from GPU PVC to final PVC..."
+            fi
+
+            echo "   Source: $gpu_path"
+            echo "   Target: $final_path"
+
+            # Create target directory
+            mkdir -p "$final_dir"
+
+            # Copy model file
+            cp -f "$gpu_path" "$final_path"
+
+            # Verify copy
+            if [ -f "$final_path" ]; then
+              local target_size=$(stat -c%s "$final_path" 2>/dev/null || echo "0")
+              if [ "$gpu_size" = "$target_size" ] && [ "$gpu_size" != "0" ]; then
+                echo "✓ Model copied successfully! (size: $gpu_size bytes)"
+                return 0
+              else
+                echo "✗ ERROR: Copy size mismatch (source: $gpu_size, target: $target_size)"
+                return 1
+              fi
+            else
+              echo "✗ ERROR: Copy failed - target file not found"
+              return 1
+            fi
+          }
+
+          # Function to wait for model file
+          wait_for_model() {
+            local model_name=$1
+            local model_path="/mnt/models/${model_name}/model.pkl"
+            local elapsed=0
+
+            echo ""
+            echo "Waiting for model: $model_name"
+            echo "Expected path: $model_path"
+
+            # First, try copying from GPU PVC if available
+            copy_model_from_gpu "$model_name" "$is_gpu_trained"
+
+            # Then wait for model in final PVC
+            while [ $elapsed -lt $MAX_WAIT_PER_MODEL ]; do
+              if [ -f "$model_path" ]; then
+                local file_size=$(stat -c%s "$model_path" 2>/dev/null || echo "unknown")
+                echo "✓ Model file found: $model_path (size: $file_size bytes)"
+                return 0
+              fi
+
+              echo "⏳ Model not found, waiting ${POLL_INTERVAL}s... (${elapsed}s/${MAX_WAIT_PER_MODEL}s)"
+              sleep $POLL_INTERVAL
+              elapsed=$((elapsed + POLL_INTERVAL))
+            done
+
+            echo "⚠️  Model not found after ${MAX_WAIT_PER_MODEL}s: $model_path"
+            echo "   This is expected on fresh deploys. Tekton training pipeline will handle model deployment."
+            return 1
+          }
+
+          # Function to restart predictor pods
+          # Uses pod deletion instead of rollout restart because KServe HPA
+          # immediately scales back any rollout restart, making it a no-op.
+          # Deleting the running pod forces the ReplicaSet to create a fresh one
+          # that picks up the new model from the PVC.
+          restart_predictor() {
+            local service_name=$1
+
+            echo ""
+            echo "Restarting predictor for InferenceService: $service_name"
+
+            # Get current predictor pods
+            local pods=$(oc get pods -n "$NAMESPACE" \
+              -l serving.kserve.io/inferenceservice="$service_name" \
+              --no-headers 2>/dev/null)
+            local pod_count=$(echo "$pods" | grep -c . 2>/dev/null || echo "0")
+
+            if [ "$pod_count" -eq 0 ]; then
+              echo "⚠️  WARNING: No predictor pods found for $service_name, skipping restart"
+              return 0
+            fi
+
+            echo "Current pod count: $pod_count"
+
+            # Delete predictor pods directly — ReplicaSet will recreate them
+            echo "Deleting predictor pods to force model reload..."
+            oc delete pods -n "$NAMESPACE" \
+              -l serving.kserve.io/inferenceservice="$service_name" \
+              --wait=false 2>/dev/null || true
+
+            # Wait for replacement pods to reach Running state
+            echo "Waiting for replacement pods..."
+            local elapsed=0
+            while [ $elapsed -lt $RESTART_TIMEOUT ]; do
+              local ready_count=$(oc get pods -n "$NAMESPACE" \
+                -l serving.kserve.io/inferenceservice="$service_name" \
+                --field-selector=status.phase=Running \
+                --no-headers 2>/dev/null | wc -l | tr -d ' ')
+
+              if [ "$ready_count" -ge 1 ]; then
+                echo "✓ Predictor pod running ($ready_count pods)"
+                oc get pods -n "$NAMESPACE" -l serving.kserve.io/inferenceservice="$service_name"
+                return 0
+              fi
+
+              echo "⏳ Waiting for pods... ($ready_count running, elapsed: ${elapsed}s)"
+              sleep 5
+              elapsed=$((elapsed + 5))
+            done
+
+            echo "⚠️  WARNING: Timeout waiting for pods to restart (${elapsed}s/${RESTART_TIMEOUT}s)"
+            oc get pods -n "$NAMESPACE" -l serving.kserve.io/inferenceservice="$service_name"
+            return 1
+          }
+
+          # Process each model
+          {{- range .Values.models }}
+          MODEL_NAME="{{ .name }}"
+          is_gpu_trained="{{ .gpuTrained | default false }}"
+          echo ""
+          echo "=========================================="
+          echo "Processing model: $MODEL_NAME (gpuTrained=$is_gpu_trained)"
+          echo "=========================================="
+
+          # Wait for model file
+          if ! wait_for_model "$MODEL_NAME"; then
+            echo "✗ Failed to find model for $MODEL_NAME, skipping restart"
+            continue
+          fi
+
+          # Restart predictor
+          if restart_predictor "$MODEL_NAME"; then
+            echo "✓ Successfully restarted predictor for $MODEL_NAME"
+          else
+            echo "⚠️  Warning: Restart may not have completed for $MODEL_NAME"
+          fi
+          {{- end }}
+
+          echo ""
+          echo "=========================================="
+          echo "✓✓✓ All predictors restarted successfully ✓✓✓"
+          echo "=========================================="
+        volumeMounts:
+        - name: model-storage
+          mountPath: /mnt/models
+        {{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+        - name: model-storage-gpu
+          mountPath: /mnt/models-gpu
+        {{- end }}
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-storage-pvc
+      {{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+      - name: model-storage-gpu
+        persistentVolumeClaim:
+          claimName: model-storage-gpu-pvc
+      {{- end }}
+  backoffLimit: 1
+  activeDeadlineSeconds: 300  # 5 minutes -- brief check only
+{{- end }}

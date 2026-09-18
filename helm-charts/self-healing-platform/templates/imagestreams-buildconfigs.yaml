@@ -1,0 +1,81 @@
+{{- if .Values.imageBuilds.enabled }}
+{{- /* Resolve git URL with fallback chain */ -}}
+{{- $gitUrl := .Values.imageBuilds.gitRepository | default .Values.git.repoURL | default .Values.global.repoURL | default .Values.global.git.repoURL | default "" }}
+{{- $gitRef := .Values.imageBuilds.gitRef | default .Values.git.revision | default .Values.global.targetRevision | default .Values.global.git.revision | default "main" }}
+{{- if $gitUrl }}
+# NOTE: coordination-engine BuildConfig and ImageStream removed
+# See: ADR-038: Go Coordination Engine Migration
+# Now uses pre-built images from Quay: quay.io/takinosh/openshift-coordination-engine:ocp-<version>-latest
+---
+# ImageStream for model serving
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: model-serving
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "self-healing-platform.name" . }}
+    app.kubernetes.io/component: model-serving
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+spec:
+  lookupPolicy:
+    local: true
+
+---
+# BuildConfig for model serving
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: model-serving
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "self-healing-platform.name" . }}
+    app.kubernetes.io/component: model-serving
+spec:
+  source:
+    type: Git
+    git:
+      uri: {{ $gitUrl }}
+      ref: {{ $gitRef }}
+    contextDir: src/models
+    {{- if .Values.gitea.enabled }}
+    sourceSecret:
+      name: {{ .Values.imageBuilds.gitCredentialsSecret }}
+    {{- end }}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      from:
+        kind: DockerImage
+        name: {{ .Values.imageBuilds.baseImage }}
+  output:
+    to:
+      kind: ImageStreamTag
+      name: model-serving:latest
+  triggers:
+    - type: ConfigChange
+    - type: Generic
+      generic:
+        secret: model-serving-webhook-secret  # pragma: allowlist secret
+        allowEnv: true
+  runPolicy: Serial
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+
+# NOTE: notebook-validator ImageStream and BuildConfig removed (duplicate)
+# See: charts/hub/templates/notebook-validator-tekton.yaml
+# The notebook-validator build is now managed by the dedicated Tekton build template
+
+# NOTE: MCP Server BuildConfig removed - now deployed as standalone Go project
+# See: ADR-036: Go-Based Standalone MCP Server
+# Repository: openshift-cluster-health-mcp (separate repo)
+# The MCP server is built and deployed independently
+
+{{- end }}{{/* end if $gitUrl */}}
+{{- end }}{{/* end if .Values.imageBuilds.enabled */}}

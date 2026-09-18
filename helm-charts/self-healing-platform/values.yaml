@@ -1,0 +1,1033 @@
+# Self-Healing Platform - Hub Cluster Helm Chart Values
+# This file contains default values for the hub cluster deployment
+
+# Cluster topology (overridden by values-hub.yaml)
+# "ha" = HighlyAvailable multi-node (CephFS on ODF nodes, gp3-csi on GPU nodes)
+# "sno" = Single Node OpenShift (gp3-csi + NooBaa only, no CephFS)
+# Affects: GPU scheduling, PVC selection, model copy jobs, validation checks
+cluster:
+  topology: "ha"
+  version: "4.20"
+
+# Main cluster configuration
+main:
+  # Namespace for deployment
+  namespace: self-healing-platform
+
+# Git configuration
+# IMPORTANT: Update values-global.yaml git.repoURL when changing clusters
+git:
+  # Git credentials
+  credentials:
+    username: user1
+    password: changeme
+
+# Gitea configuration (self-hosted Git mirror)
+# Set gitea.enabled: true when using a self-hosted Gitea instance
+# For public GitHub deployments, leave as false (default)
+gitea:
+  enabled: false
+
+# Global configuration
+global:
+  # Pattern name
+  pattern: self-healing-platform
+
+  # Chart version
+  version: "1.0.0"
+
+  # Namespace for deployment
+  namespace: self-healing-platform
+
+  # Image pull policy
+  imagePullPolicy: IfNotPresent
+
+  # Git configuration - SINGLE SOURCE OF TRUTH
+  # Update these values when deploying to a different cluster or pushing to GitHub
+  git:
+    # Git repository URL
+    # For Gitea: https://gitea-with-admin-gitea.apps.<cluster-domain>/<org>/<repo>.git
+    # For GitHub: https://github.com/<org>/<repo>.git
+    repoURL: ""  # Set via values-global.yaml or --set global.git.repoURL=...
+    # Git revision (branch, tag, commit)
+    revision: "main"
+
+# Image builds configuration
+imageBuilds:
+  # Enable image builds (BuildConfig and ImageStream)
+  enabled: true
+
+  # Git repository URL - uses global.git.repoURL if set
+  # Fallback value for when global is not available
+  gitRepository: ""  # Set via values-global.yaml global.git.repoURL
+
+  # Git reference (branch, tag, or commit) - uses global.git.revision if set
+  gitRef: ""  # Set via values-global.yaml global.git.revision
+
+  # Git credentials secret name
+  gitCredentialsSecret: git-credentials
+
+  # Base image for Docker builds
+  baseImage: registry.redhat.io/ubi8/python-39:latest
+
+  # Build resource limits
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Namespace configuration
+namespace:
+  # Create namespace
+  create: true
+
+  # Namespace name
+  name: self-healing-platform
+
+  # Namespace labels
+  labels:
+    name: self-healing-platform
+    app.kubernetes.io/component: namespace
+
+  # Namespace annotations
+  annotations:
+    openshift.io/description: "Self-Healing Platform namespace for AIOps automation"
+    openshift.io/display-name: "Self-Healing Platform"
+
+# RBAC configuration
+rbac:
+  # Create RBAC resources
+  create: true
+
+  # Service account name
+  serviceAccountName: self-healing-operator
+
+  # Role name
+  roleName: self-healing-operator
+
+  # Role binding name
+  roleBindingName: self-healing-operator
+
+  # Cluster-scoped RBAC resources (ClusterRole, ClusterRoleBinding)
+  # ⚠️ DISABLED by default for Hybrid Management Model (ADR-030)
+  # These resources are deployed via Ansible prereqs, NOT via ArgoCD
+  # Reason: Namespaced ArgoCD cannot manage cluster-scoped resources
+  clusterScoped:
+    enabled: false
+
+  # Cross-namespace RBAC (Role/RoleBinding in openshift-monitoring, default, etc.)
+  # ⚠️ DISABLED by default for Hybrid Management Model (ADR-030)
+  # These resources are deployed via Ansible prereqs, NOT via ArgoCD
+  # Reason: Namespaced ArgoCD cannot manage resources in cluster-managed namespaces
+  crossNamespaceEnabled: false
+
+# Cluster-scoped RBAC managed externally (by Ansible deploy-prereqs-only)
+# When true, mcp-server-rbac.yaml skips rendering ClusterRole/ClusterRoleBinding
+# resources that namespaced ArgoCD cannot manage (ADR-030)
+clusterRbacManagedExternally: true
+
+# Storage configuration
+storage:
+  # Workbench data storage - Jupyter notebook persistent storage
+  workbenchData:
+    size: "20Gi"
+    storageClass: "gp3-csi"  # RWO - works with EBS, ODF, most providers
+
+  # Model storage - Shared between notebooks and KServe InferenceServices
+  # SNO: RWO gp3-csi (single node, no CephFS)
+  # HA: RWX ocs-storagecluster-cephfs (multi-node, CephFS available)
+  modelStorage:
+    size: "10Gi"
+    storageClass: ""  # Auto-detected based on topology (gp3-csi for SNO, ocs-storagecluster-cephfs for HA)
+
+  # GPU model storage (HA only) - GPU-compatible RWO storage for training
+  # GPU nodes cannot mount CephFS, so gp3-csi is used for training
+  # Models are copied to modelStorage (CephFS) after training
+  # Not created on SNO (single node has all drivers)
+  modelStorageGpu:
+    size: "10Gi"
+    storageClass: "gp3-csi"  # RWO - GPU-compatible
+
+# Node configuration for GPU and storage support
+nodeConfig:
+  # GPU node support
+  gpu:
+    enabled: true
+    # Toleration for GPU nodes with nvidia.com/gpu=True:NoSchedule taint
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: "True"
+        effect: NoSchedule
+
+  # Storage node support (for CSI plugins)
+  storage:
+    enabled: true
+    # Toleration for storage nodes with node.ocs.openshift.io/storage=true:NoSchedule taint
+    tolerations:
+      - key: node.ocs.openshift.io/storage
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+# Object Store configuration (OpenShift Data Foundation / NooBaa)
+objectStore:
+  # Enable object store integration
+  enabled: true
+
+  # S3 endpoint URL (auto-detected from NooBaa route if empty)
+  # For ODF/NooBaa: https://s3.openshift-storage.svc.cluster.local
+  # Leave empty to auto-detect from route
+  endpoint: ""
+
+  # S3 access key (from ObjectBucketClaim secret)
+  # Will be populated from values-secret.yaml
+  accessKey: ""
+
+  # S3 secret key (from ObjectBucketClaim secret)
+  # Will be populated from values-secret.yaml
+  secretKey: ""
+
+  # S3 bucket names
+  buckets:
+    models: "model-storage"
+    trainingData: "training-data"
+    inferenceResults: "inference-results"
+
+  # S3 region
+  region: "us-east-1"
+
+  # SSL verification (false for self-signed certs in dev)
+  sslVerify: false
+
+  # Auto-detect S3 endpoint from NooBaa route
+  autoDetectEndpoint: true
+
+# Model Serving configuration
+modelServing:
+  # Enable model serving
+  enabled: true
+
+  # sklearn runtime configuration
+  sklearn:
+    # Custom sklearn server with XGBoost support (built via BuildConfig)
+    image: image-registry.openshift-image-registry.svc:5000/self-healing-platform/sklearn-xgboost-server:latest
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  # tensorflow runtime configuration
+  tensorflow:
+    image: kserve/tfserving:latest
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+
+# Models configuration - Define all models to be served
+# Each model automatically gets:
+# - InferenceService with correct --model_name parameter
+# - Proper resource allocation
+# - ArgoCD sync wave configuration
+models:
+  - name: anomaly-detector
+    cpu: "1"
+    memory: "1Gi"
+    cpuLimit: "4"
+    memoryLimit: "8Gi"
+    syncWave: "2"
+    gpuTrained: false
+  - name: predictive-analytics
+    cpu: "1"
+    memory: "2Gi"
+    cpuLimit: "2"
+    memoryLimit: "6Gi"
+    syncWave: "2"
+    gpuTrained: true
+
+# AI/ML Workbench configuration
+workbench:
+  # Enable workbench
+  enabled: true
+
+  # Notebook name
+  name: self-healing-workbench
+
+  # RHOAI dashboard route name override (auto-detected from cluster.version if empty)
+  # RHOAI 3.x (OCP 4.20+): "data-science-gateway"
+  # RHOAI 2.x (OCP 4.18):  "rhods-dashboard-redhat-ods-applications"
+  dashboardRoute: ""
+
+  # Image configuration
+  image:
+    repository: quay.io/opendatahub/workbench-images
+    tag: jupyter-datascience-c9s-py311_2023c_latest
+    pullPolicy: IfNotPresent
+
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 1
+      memory: 4Gi
+    limits:
+      cpu: 4
+      memory: 8Gi
+
+  # GPU configuration
+  # Disabled by default to allow scheduling on ODF storage nodes (with CephFS CSI driver)
+  # GPU nodes may not have CephFS driver required for RWX model storage
+  # For GPU workloads, use dedicated training Jobs scheduled on GPU nodes
+  gpu:
+    enabled: false
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+
+# Monitoring configuration
+monitoring:
+  # Enable monitoring
+  enabled: true
+
+  # Prometheus configuration
+  prometheus:
+    enabled: true
+    scrapeInterval: 30s
+    retentionDays: 30
+
+  # Grafana configuration
+  grafana:
+    enabled: true
+    adminPassword: ""  # Will be set from secrets
+
+  # Service monitors
+  serviceMonitors:
+    - coordination-engine
+    - mcp-server
+    - self-healing-platform
+
+# BuildConfig configuration
+buildConfig:
+  # Enable BuildConfig
+  enabled: true
+
+  # Git repository configuration
+  git:
+    uri: ""  # Will be set from values-secret.yaml
+    ref: main
+
+  # Build triggers
+  triggers:
+    - type: ConfigChange
+    - type: Generic
+
+# Security configuration
+security:
+  # Enable RBAC
+  rbac: true
+
+  # Pod security policies
+  podSecurityPolicies: true
+
+  # Network policies
+  networkPolicies: true
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+# Networking configuration
+networking:
+  # Service type
+  serviceType: ClusterIP
+
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: openshift
+    annotations: {}
+    hosts: []
+    tls: []
+
+# MCP Server Configuration
+mcpServer:
+  enabled: true
+  replicas: 1
+
+  # Image configuration
+  image:
+    repository: quay.io/takinosh/openshift-cluster-health-mcp
+    tag: ""  # Auto-derived from cluster.version (e.g. "4.20-latest"); set explicitly to override
+    pullPolicy: Always
+
+  # Service account
+  serviceAccount:
+    create: false  # Use existing self-healing-operator ServiceAccount
+    name: self-healing-operator
+
+  # Route configuration
+  route:
+    enabled: false  # Disable external route by default
+
+  # Transport protocol
+  transport: http
+
+  # Logging level
+  logLevel: info
+
+  # Coordination Engine integration
+  coordinationEngine:
+    enabled: true
+    url: "http://coordination-engine:8080"
+
+  # KServe integration
+  kserve:
+    enabled: true
+    namespace: self-healing-platform
+
+  # Prometheus integration
+  prometheus:
+    enabled: true
+    url: "https://prometheus-k8s.openshift-monitoring.svc:9091"
+
+  # Cache configuration
+  cache:
+    ttlSeconds: 30
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+# Coordination Engine Configuration
+coordinationEngine:
+  enabled: true
+  replicas: 1
+
+  # Image configuration
+  image:
+    repository: quay.io/takinosh/openshift-coordination-engine
+    tag: ""  # Auto-derived from cluster.version (e.g. "4.20-latest"); set explicitly to override
+    pullPolicy: Always
+
+  # Logging level
+  logLevel: info
+
+  # KServe Integration (ADR-039)
+  kserve:
+    enabled: true
+    namespace: self-healing-platform
+    predictorPort: 8080  # Port for KServe predictors in RawDeployment mode
+    # Use stable services (ClusterIP) instead of headless services
+    # See: charts/hub/templates/model-serving-services.yaml
+    anomalyDetectorService: anomaly-detector-stable  # Service DNS name
+    anomalyDetectorModel: anomaly-detector  # Model name in KServe API endpoint
+    predictiveAnalyticsService: predictive-analytics-stable  # Service DNS name
+    predictiveAnalyticsModel: predictive-analytics  # Model name in KServe API endpoint
+    timeout: "120s"  # Increased for feature engineering (builds 3264 features from 24h Prometheus data)
+
+  # ArgoCD Integration
+  argocd:
+    enabled: true
+    url: "https://openshift-gitops-server.openshift-gitops.svc:443"
+
+  # Prometheus Integration (for ML features)
+  prometheus:
+    enabled: true
+    url: "https://prometheus-k8s.openshift-monitoring.svc:9091"
+
+  # Feature Engineering Configuration (Issue #54)
+  # Enables building engineered features from Prometheus metrics
+  # MUST match the training notebook's feature engineering!
+  # Guide: https://github.com/KubeHeal/openshift-coordination-engine/blob/main/docs/FEATURE-ENGINEERING-GUIDE.md
+  featureEngineering:
+    # Enable feature engineering for predictive-analytics model
+    # When true: builds 3264 features (matches model trained with full feature engineering)
+    # When false: sends 5 raw features (cpu, memory, disk, network_in, network_out)
+    # NOTE: Set to false for fast-trained models (synthetic data, 5 features)
+    #       Set to true for production models (Prometheus data, 3264 features)
+    enabled: false
+    # Number of hours to look back for historical data (default: 24)
+    # Must match: notebooks/02-anomaly-detection/05-predictive-analytics-kserve.ipynb
+    lookbackHours: 24
+    # Expected feature count for validation (0=disabled)
+    # Set this to match the model's StandardScaler expectation
+    # For full feature engineering: 24 × 136 = 3264
+    # For simple model: 5 (raw metrics only)
+    expectedFeatureCount: 5
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# Feature flags
+features:
+  # Enable experimental features
+  experimental: false
+
+  # Enable beta features
+  beta: false
+
+  # Enable AI/ML features
+  aiml: true
+
+  # Enable edge deployment
+  edge: false
+
+# Notebook Validation configuration
+# Used by Jupyter Notebook Validator Operator
+notebookValidation:
+  # Enable notebook validation
+  enabled: true
+
+  # Repository authentication
+  # Set to false for public repositories (recommended with gitleaks enforcement)
+  # Set to true for private repositories (requires sourceSecretName)
+  requiresAuth: false
+
+  # Git repository for test notebooks
+  # Can be GitHub, Gitea, or any Git server
+  repository:
+    # Repository URL for notebook validation tests
+    # For Gitea: https://gitea-with-admin-gitea.apps.<cluster>/org/repo.git
+    # For GitHub: https://github.com/org/repo
+    repoURL: "https://gitea-with-admin-gitea.apps.cluster-pvbs6.pvbs6.sandbox3005.opentlc.com/takinosh/openshift-aiops-platform.git"
+    # Branch or tag to use
+    ref: "main"
+    # Context directory for notebooks (optional)
+    contextDir: "notebooks"
+
+  # GitHub/Git credentials (ONLY if requiresAuth: true)
+  github:
+    # Name of the source secret containing Git credentials
+    # This secret must exist and contain 'username' and 'password'/'token' keys
+    sourceSecretName: "github-pat-credentials-source"
+
+# Secrets management configuration
+secrets:
+  # Secret backend: vault, sealed-secrets, or external-secrets
+  backend: external-secrets
+
+  # Enable ClusterSecretStore for cross-namespace secret access
+  # Set to true if you need to share secrets across multiple namespaces
+  clusterScoped: false
+
+  # Central namespace for shared secrets (when clusterScoped is true)
+  # Defaults to main.namespace if not specified
+  centralNamespace: ""
+
+  # External Secrets Operator configuration
+  externalSecrets:
+    # Enable External Secrets Operator
+    enabled: true
+
+    # Service account for ESO
+    serviceAccount:
+      name: external-secrets-sa
+
+    # SecretStore configuration
+    secretStore:
+      name: kubernetes-secret-store
+      kind: SecretStore
+
+    # CA Provider configuration for secure Kubernetes API communication
+    caProvider:
+      enabled: true
+      type: ConfigMap
+      name: kube-root-ca.crt
+      key: ca.crt
+
+    # Refresh interval for syncing secrets
+    refreshInterval: 1h
+
+# Metadata
+metadata:
+  # Owner/team
+  owner: "platform-team"
+
+  # Environment
+  environment: "development"
+
+  # Cost center
+  costCenter: ""
+
+  # Labels
+  labels:
+    app.kubernetes.io/name: self-healing-platform
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: helm
+
+  # Annotations
+  annotations:
+    description: "Self-Healing Platform for OpenShift AIOps"
+
+# Tekton configuration (ADR-053)
+tekton:
+  # Enable Tekton pipelines (default is already deployed, this controls model training pipelines)
+  enabled: true
+
+  # Namespace for Tekton resources
+  namespace: self-healing-platform
+
+  # Model Training Configuration (ADR-053)
+  modelTraining:
+    # Enable model training pipelines
+    enabled: true
+
+    # Service account for pipelines
+    serviceAccount: "pipeline"
+
+    # Enable health checks before deployment
+    healthCheckEnabled: true
+
+    # Anomaly Detector Training Configuration
+    anomalyDetector:
+      # Cron schedule (default: Every Sunday at 2:00 AM UTC)
+      schedule: "0 2 * * 0"
+
+      # Data source mode (synthetic|prometheus|hybrid)
+      dataSource: "prometheus"
+
+    # Predictive Analytics Training Configuration
+    predictiveAnalytics:
+      # Cron schedule (default: Every Sunday at 3:00 AM UTC)
+      schedule: "0 3 * * 0"
+
+      # Data source mode (synthetic|prometheus|hybrid)
+      dataSource: "prometheus"
+
+# Notebook Validation Configuration
+# Purpose: Configure phased notebook validation via ArgoCD sync waves
+# Integration: Jupyter Notebook Validator Operator + ArgoCD Sync Waves
+# Reference: ADR-029, ADR-030
+# Operator: https://operatorhub.io/operator/jupyter-notebook-validator-operator
+
+notebooks:
+  validation:
+    # Enable notebook validation
+    enabled: true
+
+    # Enable ArgoCD sync waves for sequential execution
+    # Required for full pipeline validation with data/model dependencies
+    enableSyncWaves: true
+
+    # Operator deployment method: "olm" or "helm"
+    # - "olm": Operator installed via OperatorHub/OLM (recommended for production)
+    #          Helm chart only creates NotebookValidationJob CRs
+    # - "helm": Operator deployed by this Helm chart (for development/testing)
+    operatorDeploymentMethod: "olm"
+
+    # Operator image (only used when operatorDeploymentMethod: "helm")
+    # v1.0.6 includes: ArgoCD integration, model validation, exit code validation, advanced comparison, GPU tolerations
+    operatorImage: "quay.io/takinosh/jupyter-notebook-validator-operator:1.0.6"
+
+    # Operator resource configuration (only used when operatorDeploymentMethod: "helm")
+    operatorResources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+    # Git repository configuration
+    # NOTE: These values should match global.git.repoURL and global.git.revision
+    # Update values-global.yaml when changing clusters or pushing to GitHub
+    git:
+      # Use the same URL as values-global.yaml git.repoURL
+      url: ""  # Will be overridden - see values-global.yaml git.repoURL
+      ref: ""  # Will be overridden - see values-global.yaml git.revision
+      # credentialsSecret: "git-credentials"  # Optional: for private repos
+
+    # =========================================================================
+    # TEKTON BUILD CONFIGURATION
+    # Builds notebook-validator image with ML packages pre-installed
+    # Reference: notebooks/Dockerfile
+    # =========================================================================
+    build:
+      # PVC size for build workspace (pytorch base is ~17GB)
+      pvcSize: "50Gi"
+      # Storage class for build PVC
+      storageClass: "gp3-csi"
+      # Enable automated trigger for builds (webhook/EventListener)
+      autoTrigger: false
+      # Build timeout
+      timeout: "45m"
+
+    # Container images by tier (RHOAI images from redhat-ods-applications ImageStreams)
+    # These images have Papermill pre-installed and are optimized for OpenShift
+    #
+    # NOTE: For full ML validation, use notebook-validator image (tier3) which includes:
+    #   - statsmodels, prophet (time series forecasting)
+    #   - pyod (anomaly detection)
+    #   - xgboost, lightgbm (gradient boosting)
+    #   - seaborn, kserve
+    images:
+      # All tiers now use the notebook-validator image which has ALL ML packages pre-installed
+      # Built by BuildConfig from notebooks/Dockerfile
+      # Includes: statsmodels, prophet, pyod, xgboost, lightgbm, seaborn, kserve
+      tier1: "image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest"
+      tier2: "image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest"
+      tier3: "image-registry.openshift-image-registry.svc:5000/self-healing-platform/notebook-validator:latest"
+
+    # Resource configuration by tier
+    resources:
+      tier1:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "1Gi"
+          cpu: "1000m"
+        timeout: "5m"
+
+      tier2:
+        requests:
+          memory: "2Gi"
+          cpu: "1000m"
+        limits:
+          memory: "4Gi"
+          cpu: "2000m"
+        timeout: "15m"
+
+      tier3:
+        requests:
+          memory: "4Gi"
+          cpu: "2000m"
+        limits:
+          memory: "8Gi"
+          cpu: "4000m"
+        timeout: "45m"
+        gpu:
+          enabled: true  # Enable GPU for tier3 notebooks (predictive-analytics)
+          count: "1"
+
+    # =========================================================================
+    # v1.0.5 FEATURES CONFIGURATION (Operator ADR-049, ADR-020, ADR-041, ADR-030)
+    # =========================================================================
+    #
+    # 1. ArgoCD Integration (ADR-049)
+    #    - Auto-restart InferenceServices after model training
+    #    - Block next sync wave until notebook completes
+    #
+    #    Example:
+    #      - name: "predictive-analytics"
+    #        path: "notebooks/model-training.ipynb"
+    #        blockNextWave: true                    # Block wave 4 until complete
+    #        inferenceServiceTrigger:
+    #          name: "predictive-analytics"         # Auto-restart this InferenceService on success
+    #
+    # 2. Model Validation (ADR-020)
+    #    - Validate notebooks work with deployed KServe models
+    #    - Test model predictions with sample data
+    #
+    #    Example:
+    #      - name: "model-training"
+    #        path: "notebooks/training.ipynb"
+    #        modelValidation:
+    #          enabled: true
+    #          platform: "kserve"
+    #          phase: "both"                        # Clean + existing environments
+    #          targetModels:
+    #            - "predictive-analytics"
+    #          predictionValidation:
+    #            enabled: true
+    #            testData: '{"instances": [[1.0, 2.0, 3.0]]}'
+    #            expectedOutput: '{"predictions": [[0.8, 0.2]]}'
+    #            tolerance: "0.1"
+    #          timeout: "5m"
+    #
+    # 3. Exit Code Validation (ADR-041)
+    #    - Catch silent failures (None returns, NaN values)
+    #    - Enforce output type contracts
+    #
+    #    Example:
+    #      - name: "production-notebook"
+    #        path: "notebooks/prod.ipynb"
+    #        validationConfig:
+    #          level: "production"                  # learning|development|staging|production
+    #          strictMode: true
+    #          failOnStderr: false
+    #          detectSilentFailures: true
+    #          checkOutputTypes: true
+    #
+    # 4. Advanced Comparison (ADR-030)
+    #    - Handle non-deterministic ML outputs
+    #    - Tolerate floating-point variations
+    #
+    #    Example:
+    #      - name: "ml-training"
+    #        path: "notebooks/ml.ipynb"
+    #        comparisonConfig:
+    #          strategy: "normalized"               # exact|normalized
+    #          floatingPointTolerance: "0.01"       # 1% tolerance
+    #          ignoreTimestamps: true
+    #          ignoreExecutionCount: true
+    #
+    # =========================================================================
+    # SYNC WAVE CONFIGURATION
+    # Notebooks are organized into waves based on data/model dependencies
+    #
+    # Wave 0:  Setup & Platform Validation (MUST run first)
+    # Wave 1:  Data Collection (parallel - metrics, events, logs)
+    # Wave 2:  Feature Engineering (depends on Wave 1)
+    # Wave 3:  Anomaly Detection Models (parallel - depends on Wave 2)
+    # Wave 4:  Ensemble Model (depends on Wave 3)
+    # Wave 5:  Self-Healing Logic (depends on Wave 4)
+    # Wave 6:  Model Serving (depends on Wave 4)
+    # Wave 7:  End-to-End Scenarios (depends on Waves 5-6)
+    # Wave 8:  MCP/Lightspeed Integration (external services)
+    # Wave 9:  Monitoring (depends on all previous)
+    # Wave 10: Advanced Scenarios (final wave)
+    # =========================================================================
+    waves:
+      # Wave 0: Setup & Platform Validation
+      wave0:
+        enabled: true
+        notebooks:
+          - name: "platform-readiness-validation"
+            path: "notebooks/00-setup/00-platform-readiness-validation.ipynb"
+            tier: "tier1"
+          - name: "environment-setup"
+            path: "notebooks/00-setup/environment-setup.ipynb"
+            tier: "tier1"
+          - name: "kserve-model-onboarding"
+            path: "notebooks/00-setup/01-kserve-model-onboarding.ipynb"
+            tier: "tier1"
+
+      # Wave 1: Data Collection (parallel)
+      wave1:
+        enabled: true
+        notebooks:
+          - name: "prometheus-metrics-collection"
+            path: "notebooks/01-data-collection/prometheus-metrics-collection.ipynb"
+            tier: "tier2"
+          - name: "openshift-events-analysis"
+            path: "notebooks/01-data-collection/openshift-events-analysis.ipynb"
+            tier: "tier1"
+          - name: "log-parsing-analysis"
+            path: "notebooks/01-data-collection/log-parsing-analysis.ipynb"
+            tier: "tier2"
+
+      # Wave 2: Feature Engineering
+      wave2:
+        enabled: true
+        notebooks:
+          - name: "feature-store-demo"
+            path: "notebooks/01-data-collection/feature-store-demo.ipynb"
+            tier: "tier2"
+          - name: "synthetic-anomaly-generation"
+            path: "notebooks/01-data-collection/synthetic-anomaly-generation.ipynb"
+            tier: "tier1"
+
+      # Wave 3: Anomaly Detection Models (parallel)
+      wave3:
+        enabled: true
+        notebooks:
+          - name: "isolation-forest-implementation"
+            path: "notebooks/02-anomaly-detection/01-isolation-forest-implementation.ipynb"
+            tier: "tier2"
+            # Trains anomaly-detector model (primary production model - ADR-050, ADR-053)
+            # Model training now handled by Tekton Pipelines (ADR-053)
+            # ArgoCD sync no longer blocks on training - Tekton handles scheduling/health checks
+            # blockNextWave: false  # ADR-053: Removed - Tekton handles training
+            # inferenceServiceTrigger removed - Tekton pipeline handles restart with health checks
+            validationConfig:
+              level: "production"
+              strictMode: true
+              detectSilentFailures: true
+            comparisonConfig:
+              strategy: "normalized"
+              floatingPointTolerance: "0.01"
+              ignoreTimestamps: true
+          - name: "time-series-anomaly-detection"
+            path: "notebooks/02-anomaly-detection/02-time-series-anomaly-detection.ipynb"
+            tier: "tier2"
+            # Not deployed as InferenceService (experimental models)
+            validationConfig:
+              level: "production"
+              strictMode: true
+              detectSilentFailures: true
+          - name: "lstm-based-prediction"
+            path: "notebooks/02-anomaly-detection/03-lstm-based-prediction.ipynb"
+            tier: "tier3"
+            gpuRequired: true
+            # Not deployed as InferenceService (experimental model)
+            validationConfig:
+              level: "production"
+              strictMode: true
+              detectSilentFailures: true
+          - name: "predictive-analytics-kserve"
+            path: "notebooks/02-anomaly-detection/05-predictive-analytics-kserve.ipynb"
+            tier: "tier3"
+            gpuRequired: true  # Enable GPU for faster training (5 models need training)
+            # Trains predictive analytics model with KServe-compatible format (Issue #13 fix, ADR-051, ADR-053)
+            # Model training now handled by Tekton Pipelines (ADR-053)
+            # ArgoCD sync no longer blocks on training - Tekton handles scheduling/health checks
+            # blockNextWave: false  # ADR-053: Removed - Tekton handles training
+            # inferenceServiceTrigger removed - Tekton pipeline handles restart with health checks
+            validationConfig:
+              level: "production"
+              strictMode: true
+              detectSilentFailures: true
+            comparisonConfig:
+              strategy: "normalized"
+              floatingPointTolerance: "0.01"
+              ignoreTimestamps: true
+
+      # Wave 4: Ensemble Model
+      wave4:
+        enabled: true
+        notebooks:
+          - name: "ensemble-anomaly-methods"
+            path: "notebooks/02-anomaly-detection/04-ensemble-anomaly-methods.ipynb"
+            tier: "tier3"
+
+      # Wave 5: Self-Healing Logic
+      wave5:
+        enabled: true
+        notebooks:
+          - name: "rule-based-remediation"
+            path: "notebooks/03-self-healing-logic/rule-based-remediation.ipynb"
+            tier: "tier2"
+          - name: "ai-driven-decision-making"
+            path: "notebooks/03-self-healing-logic/ai-driven-decision-making.ipynb"
+            tier: "tier3"
+          - name: "hybrid-healing-workflows"
+            path: "notebooks/03-self-healing-logic/hybrid-healing-workflows.ipynb"
+            tier: "tier3"
+
+      # Wave 6: Model Serving
+      wave6:
+        enabled: true
+        notebooks:
+          - name: "kserve-model-deployment"
+            path: "notebooks/04-model-serving/kserve-model-deployment.ipynb"
+            tier: "tier3"
+          - name: "model-versioning-mlops"
+            path: "notebooks/04-model-serving/model-versioning-mlops.ipynb"
+            tier: "tier3"
+          - name: "inference-pipeline-setup"
+            path: "notebooks/04-model-serving/inference-pipeline-setup.ipynb"
+            tier: "tier3"
+
+      # Wave 7: End-to-End Scenarios
+      wave7:
+        enabled: true
+        notebooks:
+          - name: "pod-crash-loop-healing"
+            path: "notebooks/05-end-to-end-scenarios/pod-crash-loop-healing.ipynb"
+            tier: "tier2"
+          - name: "network-anomaly-response"
+            path: "notebooks/05-end-to-end-scenarios/network-anomaly-response.ipynb"
+            tier: "tier2"
+          - name: "resource-exhaustion-detection"
+            path: "notebooks/05-end-to-end-scenarios/resource-exhaustion-detection.ipynb"
+            tier: "tier2"
+          - name: "complete-platform-demo"
+            path: "notebooks/05-end-to-end-scenarios/complete-platform-demo.ipynb"
+            tier: "tier3"
+
+      # Wave 8: MCP & Lightspeed Integration
+      wave8:
+        enabled: true
+        notebooks:
+          - name: "mcp-server-integration"
+            path: "notebooks/06-mcp-lightspeed-integration/mcp-server-integration.ipynb"
+            tier: "tier3"
+          - name: "openshift-lightspeed-integration"
+            path: "notebooks/06-mcp-lightspeed-integration/openshift-lightspeed-integration.ipynb"
+            tier: "tier3"
+          - name: "llamastack-integration"
+            path: "notebooks/06-mcp-lightspeed-integration/llamastack-integration.ipynb"
+            tier: "tier3"
+          - name: "end-to-end-troubleshooting-workflow"
+            path: "notebooks/06-mcp-lightspeed-integration/end-to-end-troubleshooting-workflow.ipynb"
+            tier: "tier3"
+
+      # Wave 9: Monitoring & Operations
+      wave9:
+        enabled: true
+        notebooks:
+          - name: "prometheus-metrics-monitoring"
+            path: "notebooks/07-monitoring-operations/prometheus-metrics-monitoring.ipynb"
+            tier: "tier2"
+          - name: "model-performance-monitoring"
+            path: "notebooks/07-monitoring-operations/model-performance-monitoring.ipynb"
+            tier: "tier3"
+          - name: "healing-success-tracking"
+            path: "notebooks/07-monitoring-operations/healing-success-tracking.ipynb"
+            tier: "tier2"
+
+      # Wave 10: Advanced Scenarios
+      wave10:
+        enabled: true
+        notebooks:
+          - name: "predictive-scaling"
+            path: "notebooks/08-advanced-scenarios/predictive-scaling-capacity-planning.ipynb"
+            tier: "tier3"
+            # Note: Model saved to S3 via model-storage-config secret (PVC mount not supported by CRD)
+          - name: "security-incident-response"
+            path: "notebooks/08-advanced-scenarios/security-incident-response-automation.ipynb"
+            tier: "tier3"
+          - name: "cost-optimization"
+            path: "notebooks/08-advanced-scenarios/cost-optimization-resource-efficiency.ipynb"
+            tier: "tier2"
+
+# ArgoCD Configuration
+argocd:
+  # Sync policy for notebook validation
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+
+  # Resource tracking for sync waves
+  resourceHealthChecks:
+    # Custom health check for NotebookValidationJob
+    - group: mlops.mlops.dev
+      kind: NotebookValidationJob
+      check: |
+        hs = {}
+        if obj.status ~= nil then
+          if obj.status.phase == "Succeeded" then
+            hs.status = "Healthy"
+            hs.message = "Notebook validation completed successfully"
+          elseif obj.status.phase == "Failed" then
+            hs.status = "Degraded"
+            hs.message = obj.status.message or "Notebook validation failed"
+          elseif obj.status.phase == "Running" then
+            hs.status = "Progressing"
+            hs.message = "Notebook validation in progress"
+          else
+            hs.status = "Progressing"
+            hs.message = "Waiting for validation to start"
+          end
+        else
+          hs.status = "Progressing"
+          hs.message = "Waiting for status"
+        end
+        return hs

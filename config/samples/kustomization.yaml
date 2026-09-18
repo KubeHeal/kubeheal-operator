@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- aiops_v1alpha1_selfhealingplatform.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

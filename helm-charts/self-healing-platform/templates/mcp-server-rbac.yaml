@@ -1,0 +1,166 @@
+{{- if .Values.mcpServer.enabled }}
+{{- if not .Values.clusterRbacManagedExternally }}
+---
+# ClusterRole for MCP Server - Read-only cluster-wide access
+# NOTE: This is managed by Ansible in production (see ansible/roles/validated_patterns_deploy_cluster_resources)
+# Set clusterRbacManagedExternally: true to skip rendering this resource
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "self-healing-platform.name" . }}-mcp-server-cluster
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+rules:
+  # Core Kubernetes resources (read-only)
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - pods
+      - events
+      - namespaces
+      - persistentvolumes
+      - services
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Apps resources (read-only)
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Batch resources (read-only)
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Storage resources (read-only)
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Custom Resource Definitions (read-only)
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+
+  # OpenShift-specific resources (read-only)
+  - apiGroups: ["route.openshift.io"]
+    resources:
+      - routes
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Monitoring resources (read-only)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources:
+      - servicemonitors
+      - prometheusrules
+    verbs:
+      - get
+      - list
+      - watch
+
+  # KServe InferenceServices (read-only)
+  - apiGroups: ["serving.kserve.io"]
+    resources:
+      - inferenceservices
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Knative Serving (read-only)
+  - apiGroups: ["serving.knative.dev"]
+    resources:
+      - services
+      - routes
+      - configurations
+      - revisions
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
+
+{{- if not .Values.clusterRbacManagedExternally }}
+---
+# ClusterRoleBinding for MCP Server ServiceAccount
+# NOTE: This is managed by Ansible in production (see ansible/roles/validated_patterns_deploy_cluster_resources)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "self-healing-platform.name" . }}-mcp-server-cluster
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "self-healing-platform.name" . }}-mcp-server-cluster
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.mcpServer.serviceAccount.name | default "self-healing-operator" }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+
+---
+# ServiceAccount for MCP Server (if not using existing)
+{{- if .Values.mcpServer.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.mcpServer.serviceAccount.name | default "mcp-server" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+{{- end }}
+
+{{- if not .Values.clusterRbacManagedExternally }}
+---
+# ClusterRoleBinding for Prometheus monitoring access
+# NOTE: This is managed by Ansible in production (see ansible/roles/validated_patterns_deploy_cluster_resources)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "self-healing-platform.name" . }}-mcp-prometheus
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view  # Built-in OpenShift role for Prometheus access
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.mcpServer.serviceAccount.name | default "self-healing-operator" }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

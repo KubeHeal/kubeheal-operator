@@ -1,0 +1,50 @@
+apiVersion: aiops.kubeheal.io/v1alpha1
+kind: SelfHealingPlatform
+metadata:
+  name: kubeheal
+  namespace: self-healing-platform
+spec:
+  cluster:
+    topology: "sno"
+    version: "4.22"
+
+  global:
+    pattern: "self-healing-platform"
+    version: "1.0.0"
+    namespace: "self-healing-platform"
+    git:
+      repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
+      revision: "main"
+
+  coordinationEngine:
+    enabled: true
+    replicas: 1
+
+  mcpServer:
+    enabled: true
+    replicas: 1
+
+  modelServing:
+    enabled: true
+
+  storage:
+    workbenchData:
+      size: "20Gi"
+      storageClass: "gp3-csi"
+    modelStorage:
+      size: "10Gi"
+      storageClass: "gp3-csi"
+
+  objectStore:
+    enabled: true
+
+  monitoring:
+    enabled: true
+
+  workbench:
+    enabled: true
+    gpu:
+      enabled: false
+
+  features:
+    aiml: true

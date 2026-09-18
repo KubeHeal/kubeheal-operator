@@ -1,0 +1,66 @@
+{{- $env := .Values.metadata.environment | default "development" }}
+{{- $envSuffix := printf "-%s" (regexFind "[a-z]+" $env) }}
+# Removed orphaned PVCs (never mounted by any workload):
+# - self-healing-data-development (10Gi) - no templates reference it
+# - model-artifacts-development (50Gi) - no templates reference it
+# Only creating PVCs that are actually used by deployments/jobs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "workbench-data%s" $envSuffix }}
+  labels:
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.workbenchData.size | default "20Gi" }}
+  storageClassName: {{ .Values.storage.workbenchData.storageClass | default "gp3-csi" }}
+---
+# Model Storage PVC - Shared between notebooks and KServe InferenceServices
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-storage-pvc
+  labels:
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/name: model-storage
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+    description: "Shared model storage for notebooks and KServe"
+spec:
+  accessModes:
+    {{- if eq ((.Values.cluster).topology | default "ha") "sno" }}
+    - ReadWriteOnce
+    {{- else }}
+    - ReadWriteMany
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ if and .Values.storage .Values.storage.modelStorage .Values.storage.modelStorage.size }}{{ .Values.storage.modelStorage.size }}{{ else }}"10Gi"{{ end }}
+  storageClassName: {{ if and .Values.storage .Values.storage.modelStorage .Values.storage.modelStorage.storageClass }}{{ .Values.storage.modelStorage.storageClass }}{{ else if eq ((.Values.cluster).topology | default "ha") "sno" }}"gp3-csi"{{ else }}"ocs-storagecluster-cephfs"{{ end }}
+{{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+---
+# Model Storage PVC for GPU Training (HA only)
+# GPU nodes cannot mount CephFS; this gp3-csi (RWO) PVC is used for training,
+# then models are copied to model-storage-pvc (CephFS) via gpu-model-copy Job.
+# Skipped for SNO: single node has all drivers, training writes directly to model-storage-pvc.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-storage-gpu-pvc
+  labels:
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/name: model-storage-gpu
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+    description: "GPU-compatible model storage for training (gp3-csi RWO) - models copied to model-storage-pvc after training"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ if and .Values.storage .Values.storage.modelStorageGpu .Values.storage.modelStorageGpu.size }}{{ .Values.storage.modelStorageGpu.size }}{{ else }}"10Gi"{{ end }}
+  storageClassName: {{ if and .Values.storage .Values.storage.modelStorageGpu .Values.storage.modelStorageGpu.storageClass }}{{ .Values.storage.modelStorageGpu.storageClass }}{{ else }}"gp3-csi"{{ end }}
+{{- end }}

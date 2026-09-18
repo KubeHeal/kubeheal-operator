@@ -1,0 +1,76 @@
+apiVersion: aiops.kubeheal.io/v1alpha1
+kind: SelfHealingPlatform
+metadata:
+  name: kubeheal
+  namespace: self-healing-platform
+spec:
+  cluster:
+    topology: "ha"
+    version: "4.22"
+
+  global:
+    pattern: "self-healing-platform"
+    version: "1.0.0"
+    namespace: "self-healing-platform"
+    imagePullPolicy: "IfNotPresent"
+    git:
+      repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
+      revision: "main"
+
+  coordinationEngine:
+    enabled: true
+    replicas: 1
+    image:
+      repository: "quay.io/takinosh/openshift-coordination-engine"
+      pullPolicy: "Always"
+    logLevel: "info"
+
+  mcpServer:
+    enabled: true
+    replicas: 1
+    image:
+      repository: "quay.io/takinosh/openshift-cluster-health-mcp"
+      pullPolicy: "Always"
+
+  modelServing:
+    enabled: true
+
+  models:
+    - name: anomaly-detector
+      cpu: "500m"
+      memory: "512Mi"
+      cpuLimit: "1"
+      memoryLimit: "1Gi"
+      gpuTrained: false
+    - name: predictive-analytics
+      cpu: "500m"
+      memory: "1Gi"
+      cpuLimit: "2"
+      memoryLimit: "2Gi"
+      gpuTrained: true
+
+  storage:
+    workbenchData:
+      size: "20Gi"
+      storageClass: "gp3-csi"
+    modelStorage:
+      size: "10Gi"
+
+  objectStore:
+    enabled: true
+
+  monitoring:
+    enabled: true
+
+  workbench:
+    enabled: true
+
+  notebooks:
+    validation:
+      enabled: true
+
+  tekton:
+    enabled: true
+
+  features:
+    aiml: true
