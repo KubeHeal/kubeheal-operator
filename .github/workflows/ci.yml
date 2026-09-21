@@ -26,11 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
       - name: Build operator image
         run: make docker-build IMG=${{ env.IMAGE_TAG_BASE }}:${{ github.sha }}
 
@@ -44,6 +39,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: false
 
       - name: Install operator-sdk
         run: |
@@ -67,6 +63,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: false
 
       - name: Install operator-sdk
         run: |
