@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/png/kubeheal-logo-horizontal.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/branding/png/kubeheal-logo-light.png">
+    <img alt="KubeHeal Logo" src="assets/branding/png/kubeheal-logo-horizontal.png" width="520">
+  </picture>
+</p>
+
 # KubeHeal Operator
 
 A Kubernetes operator for deploying and managing the [KubeHeal AIOps Self-Healing Platform](https://github.com/KubeHeal/openshift-aiops-platform) on OpenShift clusters.
