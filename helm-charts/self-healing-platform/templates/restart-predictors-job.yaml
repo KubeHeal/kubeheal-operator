@@ -37,10 +37,18 @@ spec:
     spec:
       serviceAccountName: self-healing-operator
       restartPolicy: OnFailure
+      # Co-schedule with workbench pod so the RWO PVC is on the same node
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                notebook-name: self-healing-workbench
+            topologyKey: kubernetes.io/hostname
       initContainers:
       # Wait for PVC to be mounted
       - name: wait-for-pvc
-        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
         command:
         - /bin/bash
         - -c

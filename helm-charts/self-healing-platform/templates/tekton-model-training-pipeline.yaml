@@ -126,6 +126,13 @@ spec:
               - secretRef:
                   name: model-storage-config
             serviceAccountName: self-healing-workbench
+            affinity:
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  - labelSelector:
+                      matchLabels:
+                        app: self-healing-workbench
+                    topologyKey: kubernetes.io/hostname
             volumeMounts:
               - name: model-storage
                 mountPath: /mnt/models
@@ -135,8 +142,8 @@ spec:
                   claimName: model-storage-pvc
             resources:
               requests:
-                memory: "4Gi"
-                cpu: "2000m"
+                memory: "2Gi"
+                cpu: "500m"
               limits:
                 memory: "8Gi"
                 cpu: "4000m"
@@ -300,6 +307,7 @@ spec:
               - secretRef:
                   name: model-storage-config
             serviceAccountName: self-healing-workbench
+            {{- if not (eq (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
             volumeMounts:
               - name: model-storage
                 mountPath: /mnt/models
@@ -311,6 +319,7 @@ spec:
                   {{- else }}
                   claimName: model-storage-gpu-pvc
                   {{- end }}
+            {{- end }}
             resources:
               requests:
                 memory: "4Gi"
@@ -709,7 +718,7 @@ spec:
         print(f"Endpoint test failed after {max_retries} attempts")
         sys.exit(1)
 
-{{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+{{- if and (ne ((.Values.cluster).topology | default "ha") "sno") (ne (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
 ---
 # =============================================================================
 # Task: copy-gpu-model-to-shared (GPU pipeline only, HA only)
@@ -738,7 +747,7 @@ spec:
 
   steps:
     - name: wait-and-copy
-      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
       volumeMounts:
         - name: model-storage-gpu
           mountPath: /mnt/models-gpu
@@ -1009,7 +1018,7 @@ spec:
         - name: git-ref
           value: $(params.git-ref)
 
-    {{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+    {{- if and (ne ((.Values.cluster).topology | default "ha") "sno") (ne (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
     # Task 2: Copy GPU model to shared storage (HA only -- SNO writes directly to shared PVC)
     - name: copy-gpu-model
       runAfter:
@@ -1022,7 +1031,10 @@ spec:
           value: $(params.model-name)
     {{- end }}
 
-    # Task 3: Health check (only if enabled)
+    # Task 3: Health check (only if enabled and PVC-based storage available)
+    # Skipped for aws-s3 backend on GPU pipeline: model is on S3, not local PVC.
+    # The post-deployment-check (test-inference-endpoint) validates the model works.
+    {{- if not (eq (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
     - name: health-check
       when:
         - input: "$(params.health-check-enabled)"
@@ -1040,11 +1052,16 @@ spec:
       params:
         - name: model-name
           value: $(params.model-name)
+    {{- end }}
 
     # Task 4: Deploy to InferenceService
     - name: deploy-model
       runAfter:
+        {{- if not (eq (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
         - health-check
+        {{- else }}
+        - train-model
+        {{- end }}
       taskRef:
         kind: Task
         name: restart-inference-service

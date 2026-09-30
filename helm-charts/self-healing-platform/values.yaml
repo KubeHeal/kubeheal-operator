@@ -7,7 +7,7 @@
 # Affects: GPU scheduling, PVC selection, model copy jobs, validation checks
 cluster:
   topology: "ha"
-  version: "4.20"
+  version: "4.22"
 
 # Main cluster configuration
 main:
@@ -178,16 +178,33 @@ objectStore:
   # Enable object store integration
   enabled: true
 
-  # S3 endpoint URL (auto-detected from NooBaa route if empty)
+  # Storage backend: "aws-s3" (native AWS S3, default for ROSA) or "noobaa" (ODF/NooBaa, for baremetal/air-gapped)
+  # aws-s3: Uses native AWS S3 buckets with IRSA or static IAM credentials (no ODF dependency)
+  # noobaa: Uses OpenShift Data Foundation NooBaa S3 (requires ODF operator)
+  backend: "aws-s3"
+
+  # AWS S3 native configuration (only used when backend: "aws-s3")
+  aws:
+    # AWS region for S3 buckets
+    region: "us-east-1"
+    # S3 bucket name for model storage (must be pre-created or created by s3-bucket-setup job)
+    bucketName: ""
+    # IAM Role ARN for IRSA (leave empty for static credentials)
+    # When set, ServiceAccount is annotated with eks.amazonaws.com/role-arn
+    irsaRoleArn: ""
+    # S3 endpoint URL (leave empty for default AWS S3 endpoint)
+    endpoint: ""
+
+  # S3 endpoint URL (auto-detected from NooBaa route if empty, used by noobaa backend)
   # For ODF/NooBaa: https://s3.openshift-storage.svc.cluster.local
   # Leave empty to auto-detect from route
   endpoint: ""
 
-  # S3 access key (from ObjectBucketClaim secret)
+  # S3 access key (from ObjectBucketClaim secret, used by noobaa backend)
   # Will be populated from values-secret.yaml
   accessKey: ""
 
-  # S3 secret key (from ObjectBucketClaim secret)
+  # S3 secret key (from ObjectBucketClaim secret, used by noobaa backend)
   # Will be populated from values-secret.yaml
   secretKey: ""
 
@@ -200,10 +217,10 @@ objectStore:
   # S3 region
   region: "us-east-1"
 
-  # SSL verification (false for self-signed certs in dev)
+  # SSL verification (false for self-signed certs in dev, true for native AWS S3)
   sslVerify: false
 
-  # Auto-detect S3 endpoint from NooBaa route
+  # Auto-detect S3 endpoint from NooBaa route (only for noobaa backend)
   autoDetectEndpoint: true
 
 # Model Serving configuration
@@ -284,9 +301,9 @@ workbench:
       memory: 8Gi
 
   # GPU configuration
-  # Disabled by default to allow scheduling on ODF storage nodes (with CephFS CSI driver)
-  # GPU nodes may not have CephFS driver required for RWX model storage
-  # For GPU workloads, use dedicated training Jobs scheduled on GPU nodes
+  # Disabled by default to avoid GPU contention on SNO (single GPU node) and to allow
+  # scheduling on ODF storage nodes (with CephFS CSI driver) where GPU may not be present.
+  # For GPU workloads, use dedicated training Jobs/NVJs scheduled on GPU nodes (Issue #74).
   gpu:
     enabled: false
     nodeSelector:
@@ -359,6 +376,12 @@ networking:
     hosts: []
     tls: []
 
+# Alerting Rules Configuration
+alerts:
+  enabled: false
+  cpuThrottleThreshold: 0.25
+  anomalyScoreThreshold: 0.8
+
 # MCP Server Configuration
 mcpServer:
   enabled: true
@@ -382,8 +405,17 @@ mcpServer:
   # Transport protocol
   transport: http
 
+  # Server version
+  version: "0.2.0"
+
   # Logging level
   logLevel: info
+
+  # Request timeout (Go duration format)
+  requestTimeout: "30s"
+
+  # Maximum concurrent tool calls
+  maxConcurrentTools: "10"
 
   # Coordination Engine integration
   coordinationEngine:
@@ -394,6 +426,7 @@ mcpServer:
   kserve:
     enabled: true
     namespace: self-healing-platform
+    predictorPort: "8012"
 
   # Prometheus integration
   prometheus:
@@ -402,7 +435,7 @@ mcpServer:
 
   # Cache configuration
   cache:
-    ttlSeconds: 30
+    ttl: "30s"
 
   # Resource limits
   resources:
@@ -469,6 +502,19 @@ coordinationEngine:
     # For full feature engineering: 24 × 136 = 3264
     # For simple model: 5 (raw metrics only)
     expectedFeatureCount: 5
+
+  # Alert Webhook Sinks (coordination-engine v1.2.0)
+  # Configure external notification channels for critical anomalies
+  alertWebhooks:
+    slackWebhookUrl: ""
+    pagerdutyRoutingKey: ""
+    alertmanagerUrl: ""
+
+  # OOM Remediation Configuration (coordination-engine v1.2.0)
+  # Controls automatic memory limit patching for OOMKilled pods
+  oomRemediation:
+    memoryMultiplier: "2.5"
+    memoryMaxLimit: "2Gi"
 
   # Resource limits
   resources:
@@ -694,7 +740,7 @@ notebooks:
       tier1:
         requests:
           memory: "512Mi"
-          cpu: "500m"
+          cpu: "250m"
         limits:
           memory: "1Gi"
           cpu: "1000m"
@@ -703,10 +749,10 @@ notebooks:
       tier2:
         requests:
           memory: "2Gi"
-          cpu: "1000m"
+          cpu: "500m"
         limits:
           memory: "4Gi"
-          cpu: "2000m"
+          cpu: "1000m"
         timeout: "15m"
 
       tier3:
@@ -876,15 +922,21 @@ notebooks:
               level: "production"
               strictMode: true
               detectSilentFailures: true
+
+      # Wave 4: Ensemble Model + Predictive Analytics GPU (staggered from wave3)
+      wave4:
+        enabled: true
+        notebooks:
+          - name: "ensemble-anomaly-methods"
+            path: "notebooks/02-anomaly-detection/04-ensemble-anomaly-methods.ipynb"
+            tier: "tier3"
           - name: "predictive-analytics-kserve"
             path: "notebooks/02-anomaly-detection/05-predictive-analytics-kserve.ipynb"
             tier: "tier3"
-            gpuRequired: true  # Enable GPU for faster training (5 models need training)
+            gpuRequired: true  # Staggered to wave4 to avoid GPU contention with lstm-based-prediction in wave3 (Issue #74)
             # Trains predictive analytics model with KServe-compatible format (Issue #13 fix, ADR-051, ADR-053)
             # Model training now handled by Tekton Pipelines (ADR-053)
             # ArgoCD sync no longer blocks on training - Tekton handles scheduling/health checks
-            # blockNextWave: false  # ADR-053: Removed - Tekton handles training
-            # inferenceServiceTrigger removed - Tekton pipeline handles restart with health checks
             validationConfig:
               level: "production"
               strictMode: true
@@ -893,14 +945,6 @@ notebooks:
               strategy: "normalized"
               floatingPointTolerance: "0.01"
               ignoreTimestamps: true
-
-      # Wave 4: Ensemble Model
-      wave4:
-        enabled: true
-        notebooks:
-          - name: "ensemble-anomaly-methods"
-            path: "notebooks/02-anomaly-detection/04-ensemble-anomaly-methods.ipynb"
-            tier: "tier3"
 
       # Wave 5: Self-Healing Logic
       wave5:

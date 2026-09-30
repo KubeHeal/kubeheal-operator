@@ -47,10 +47,18 @@ spec:
       # No securityContext — let OpenShift SCC assign UID/GID from namespace range.
       # The namespace range is [1000960000, 1000969999]; hardcoding any value
       # outside that range causes "forbidden: unable to validate against any SCC".
+      # Co-schedule with workbench pod so the RWO PVC is on the same node
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                notebook-name: self-healing-workbench
+            topologyKey: kubernetes.io/hostname
       initContainers:
       # Wait for final PVC to be mounted (required)
       - name: wait-for-pvcs
-        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
         command:
         - /bin/bash
         - -c
@@ -291,7 +299,7 @@ spec:
         volumeMounts:
         - name: model-storage
           mountPath: /mnt/models
-        {{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+        {{- if and (ne ((.Values.cluster).topology | default "ha") "sno") (ne (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
         - name: model-storage-gpu
           mountPath: /mnt/models-gpu
         {{- end }}
@@ -299,7 +307,7 @@ spec:
       - name: model-storage
         persistentVolumeClaim:
           claimName: model-storage-pvc
-      {{- if ne ((.Values.cluster).topology | default "ha") "sno" }}
+      {{- if and (ne ((.Values.cluster).topology | default "ha") "sno") (ne (default "aws-s3" ((.Values.objectStore).backend)) "aws-s3") }}
       - name: model-storage-gpu
         persistentVolumeClaim:
           claimName: model-storage-gpu-pvc

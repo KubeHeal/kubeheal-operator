@@ -196,20 +196,21 @@ Usage: {{- include "self-healing-platform.ifEnabled" (dict "enabled" .Values.fea
 {{- end }}
 
 {{/*
-Default image tag: "<version>-latest" (e.g. "4.20-latest").
-Used by components whose registry tags have no prefix (MCP server).
+Default image tag for MCP server.
+Uses the explicit tag from values if set, otherwise falls back to "1.2.0".
+The MCP server uses semver tags (1.2.0, latest) not OCP-versioned tags.
 */}}
 {{- define "self-healing-platform.imageTag" -}}
-{{- $version := .Values.cluster.version | default "4.20" }}
-{{- printf "%s-latest" $version }}
+{{- "1.2.0" }}
 {{- end }}
 
 {{/*
-OCP-prefixed image tag: "ocp-<version>-latest" (e.g. "ocp-4.20-latest").
-Used by components whose registry tags carry the ocp- prefix (coordination engine).
+Default image tag for coordination engine.
+Uses the explicit tag from values if set, otherwise "ocp-<version>-latest".
+The CE uses OCP-versioned tags (ocp-4.22-latest).
 */}}
 {{- define "self-healing-platform.ocpImageTag" -}}
-{{- $version := .Values.cluster.version | default "4.20" }}
+{{- $version := .Values.cluster.version | default "4.22" }}
 {{- printf "ocp-%s-latest" $version }}
 {{- end }}
 
@@ -217,14 +218,14 @@ Used by components whose registry tags carry the ocp- prefix (coordination engin
 RHOAI dashboard route name
 Returns the route hostname prefix based on RHOAI version:
   - RHOAI 3.x (OCP 4.20+): "data-science-gateway"
-  - RHOAI 2.x (OCP 4.18):  "rhods-dashboard-redhat-ods-applications"
+  - RHOAI 2.x (legacy):     "rhods-dashboard-redhat-ods-applications"
 Can be overridden explicitly via workbench.dashboardRoute.
 */}}
 {{- define "self-healing-platform.dashboardRoute" -}}
 {{- if ((.Values.workbench).dashboardRoute | default "") }}
 {{- .Values.workbench.dashboardRoute }}
 {{- else }}
-{{- $version := .Values.cluster.version | default "4.18" }}
+{{- $version := .Values.cluster.version | default "4.22" }}
 {{- if semverCompare ">=4.20" $version }}
 {{- "data-science-gateway" }}
 {{- else }}
