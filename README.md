@@ -21,7 +21,29 @@ The KubeHeal Operator automates the deployment and lifecycle management of the K
 - Tekton pipelines for model training and validation
 - Monitoring stack (Prometheus rules, Grafana dashboards, ServiceMonitors)
 - Jupyter workbench for ML development
-- S3 object storage integration (NooBaa/ODF)
+- DataScienceCluster CR (enables KServe and workbenches in RHOAI)
+- S3 object storage integration (NooBaa/ODF or native AWS S3)
+
+## Platform Compatibility
+
+The operator uses the same topology-aware Helm chart as the [Validated Patterns deployment](https://github.com/KubeHeal/openshift-aiops-platform). Two CR values control all platform-specific behavior:
+
+| Platform | `cluster.topology` | `objectStore.backend` | Storage Class | Support Tier |
+|----------|--------------------|-----------------------|---------------|-------------|
+| **ROSA Classic HA** | `"ha"` | `"aws-s3"` (default) | `gp3-csi` | Tier 1 -- Tested |
+| **ROSA Single-Worker** | `"sno"` | `"aws-s3"` | `gp3-csi` | Tier 1 -- Tested |
+| **AWS IPI** | `"ha"` | `"aws-s3"` or `"noobaa"` | `gp3-csi` or `ocs-storagecluster-cephfs` | Tier 2 -- Community |
+| **Baremetal (IPI/ABI)** | `"ha"` | `"noobaa"` | `ocs-storagecluster-cephfs` | Tier 2 -- Community |
+| **Baremetal + External S3** | `"ha"` | `"aws-s3"` | `ocs-storagecluster-cephfs` | Tier 2 -- Community |
+| **SNO (non-ROSA)** | `"sno"` | `"noobaa"` | `gp3-csi` | Tier 2 -- Community |
+
+> **Tier 1** is tested in CI by the maintainers. **Tier 2** is community-maintained -- the chart supports these platforms but testing is contributed. See `config/samples/` for ready-to-use CRs for each platform.
+
+### Baremetal and Agent-Based Install
+
+Baremetal clusters (installed via IPI-baremetal, Agent-Based Installer, or UPI) are fully supported through the `"noobaa"` storage backend, which uses ODF on local disks. Alternatively, if you have an external S3 service (MinIO, Ceph RADOS Gateway), set `objectStore.backend: "aws-s3"` with a custom `objectStore.aws.endpoint`.
+
+See [`config/samples/aiops_v1alpha1_selfhealingplatform_baremetal.yaml`](config/samples/aiops_v1alpha1_selfhealingplatform_baremetal.yaml) for a complete example with both options.
 
 ## Quick Start
 
@@ -75,6 +97,8 @@ spec:
     enabled: true
   modelServing:
     enabled: true
+  dataScienceCluster:
+    enabled: true     # Creates RHOAI DataScienceCluster CR
   monitoring:
     enabled: true
   notebooks:
@@ -83,7 +107,13 @@ spec:
     aiml: true
 ```
 
-See `config/samples/` for HA and SNO configuration examples.
+### Sample CRs
+
+| File | Platform | Description |
+|------|----------|-------------|
+| [`aiops_v1alpha1_selfhealingplatform.yaml`](config/samples/aiops_v1alpha1_selfhealingplatform.yaml) | ROSA / AWS HA | Default HA configuration with AWS S3 storage |
+| [`aiops_v1alpha1_selfhealingplatform_sno.yaml`](config/samples/aiops_v1alpha1_selfhealingplatform_sno.yaml) | SNO | Single Node OpenShift with reduced resources |
+| [`aiops_v1alpha1_selfhealingplatform_baremetal.yaml`](config/samples/aiops_v1alpha1_selfhealingplatform_baremetal.yaml) | Baremetal / ABI | ODF storage with external S3 alternative |
 
 ## Prerequisites
 
@@ -92,15 +122,17 @@ The following operators must be installed on your cluster before deploying:
 | Operator | Required | Purpose |
 |----------|----------|---------|
 | Red Hat OpenShift AI (RHOAI) | Yes | ML platform, KServe |
-| OpenShift Data Foundation (ODF) | Yes | S3 object storage |
 | OpenShift Pipelines (Tekton) | Yes | CI/CD pipelines |
-| External Secrets Operator | Yes | Secrets management |
+| OpenShift Data Foundation (ODF) | When `objectStore.backend: "noobaa"` | S3 object storage (baremetal, SNO) |
 | NVIDIA GPU Operator | Optional | GPU workloads |
 
-## Supported Platforms
+> **Note:** External Secrets Operator and Notebook Validator Operator are installed automatically by the chart via OLM Subscriptions. You do not need to pre-install them.
 
-- OpenShift 4.20 - 4.22
-- HA (HighlyAvailable) and SNO (Single Node OpenShift) topologies
+> **Note:** The chart creates a DataScienceCluster CR by default (`dataScienceCluster.enabled: true`). If you manage RHOAI configuration separately, set this to `false`.
+
+## Supported OpenShift Versions
+
+- OpenShift 4.20, 4.21, 4.22
 
 ## Development
 
@@ -124,13 +156,23 @@ make bundle
 kubeheal-operator
   └── watches SelfHealingPlatform CR
        └── reconciles Helm chart (helm-charts/self-healing-platform/)
+            ├── DataScienceCluster (RHOAI configuration)
             ├── Coordination Engine (Deployment)
             ├── MCP Server (Deployment)
             ├── KServe InferenceServices
             ├── Tekton Pipelines + Tasks
             ├── Monitoring (ServiceMonitor, PrometheusRule)
             ├── Jupyter Workbench (Notebook CR)
-            └── Storage (PVCs, ObjectBucketClaim)
+            └── Storage (PVCs, ObjectBucketClaim or AWS S3)
+```
+
+## Chart Sync
+
+The embedded Helm chart is synced from [`charts/hub/`](https://github.com/KubeHeal/openshift-aiops-platform/tree/main/charts/hub) in the main platform repo:
+
+```bash
+# From the openshift-aiops-platform repo
+make sync-operator-chart SYNC_ARGS="--push"
 ```
 
 ## Related Repositories

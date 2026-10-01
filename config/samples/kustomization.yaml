@@ -1,4 +1,8 @@
 ## Append samples of your project ##
 resources:
 - aiops_v1alpha1_selfhealingplatform.yaml
+# Additional sample CRs for reference (not included in kustomize build
+# because they share the same resource name/namespace as the default):
+# - aiops_v1alpha1_selfhealingplatform_sno.yaml
+# - aiops_v1alpha1_selfhealingplatform_baremetal.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

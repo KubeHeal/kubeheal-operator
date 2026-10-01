@@ -1,0 +1,87 @@
+# Baremetal / Agent-Based Install -- ODF storage backend
+#
+# For OpenShift clusters installed on physical servers via Agent-Based
+# Installer, IPI-baremetal, or UPI.  Uses ODF (OpenShift Data Foundation)
+# for Ceph block/file storage and NooBaa S3 for model artifacts.
+#
+# Prerequisites:
+#   - OpenShift 4.20+ on baremetal
+#   - OpenShift Data Foundation installed (provides CephFS + NooBaa)
+#   - Red Hat OpenShift AI (RHOAI) installed
+#   - OpenShift Pipelines (Tekton) installed
+#
+# For external S3 (MinIO, Ceph RADOS Gateway) instead of ODF, see
+# the inline comments below for the objectStore override.
+apiVersion: aiops.kubeheal.io/v1alpha1
+kind: SelfHealingPlatform
+metadata:
+  name: kubeheal
+  namespace: self-healing-platform
+spec:
+  cluster:
+    topology: "ha"
+    version: "4.22"
+
+  global:
+    pattern: "self-healing-platform"
+    version: "1.0.0"
+    namespace: "self-healing-platform"
+    git:
+      repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
+      revision: "main"
+
+  coordinationEngine:
+    enabled: true
+    replicas: 1
+
+  mcpServer:
+    enabled: true
+    replicas: 1
+
+  modelServing:
+    enabled: true
+
+  dataScienceCluster:
+    enabled: true
+
+  storage:
+    workbenchData:
+      size: "20Gi"
+      storageClass: "ocs-storagecluster-cephfs"
+    modelStorage:
+      size: "10Gi"
+      storageClass: "ocs-storagecluster-cephfs"
+
+  # ODF/NooBaa S3 for model artifacts
+  objectStore:
+    enabled: true
+    backend: "noobaa"
+
+  # --- Alternative: external S3 (MinIO, Ceph RGW, etc.) ---
+  # Uncomment and replace the objectStore block above with:
+  #
+  # objectStore:
+  #   enabled: true
+  #   backend: "aws-s3"
+  #   aws:
+  #     endpoint: "https://minio.example.com"
+  #     region: "us-east-1"
+  #   accessKey: "<your-s3-access-key>"
+  #   secretKey: "<your-s3-secret-key>"
+  #   sslVerify: false  # set true if using trusted TLS certs
+
+  monitoring:
+    enabled: true
+
+  workbench:
+    enabled: true
+
+  notebooks:
+    validation:
+      enabled: true
+
+  tekton:
+    enabled: true
+
+  features:
+    aiml: true
