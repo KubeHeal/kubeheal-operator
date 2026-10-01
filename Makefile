@@ -126,6 +126,9 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+
 .PHONY: kustomize
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
