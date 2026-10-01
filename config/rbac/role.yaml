@@ -138,19 +138,13 @@ rules:
   verbs:
   - "*"
 
-# External Secrets
+# External Secrets CRs
 - apiGroups:
   - external-secrets.io
   resources:
   - externalsecrets
   - secretstores
   - clustersecretstores
-  verbs:
-  - "*"
-- apiGroups:
-  - operator.external-secrets.io
-  resources:
-  - externalsecretsconfigs
   verbs:
   - "*"
 
@@ -251,6 +245,26 @@ rules:
   - console.openshift.io
   resources:
   - consoleplugins
+  verbs:
+  - "*"
+
+# OpenShift Console operator (register plugins)
+- apiGroups:
+  - operator.openshift.io
+  resources:
+  - consoles
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+  - update
+
+# ExternalSecretsConfig (operator.openshift.io)
+- apiGroups:
+  - operator.openshift.io
+  resources:
+  - externalsecretsconfigs
   verbs:
   - "*"
 

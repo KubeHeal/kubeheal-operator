@@ -242,19 +242,18 @@ tier1_olm_install() {
         oc logs -n "$OPERATOR_NAMESPACE" -l control-plane=controller-manager --tail=20 2>/dev/null || true
     fi
 
-    # Test 1.7: RBAC - ClusterRole exists (OLM may prefix with operator name)
+    # Test 1.7: RBAC - ClusterRole exists (OLM generates hashed names like kubeheal-operator.v0.1.4-XXXX)
     local clusterrole_found=false
-    for cr_name in "kubeheal-operator-manager-role" "manager-role"; do
-        if oc get clusterrole "$cr_name" &>/dev/null 2>&1; then
-            clusterrole_found=true
-            record_result "T1.7-clusterrole-exists" "PASSED" "$cr_name"
-            break
-        fi
-    done
+    local matching_roles
+    matching_roles=$(oc get clusterrole -o name 2>/dev/null | grep -i "kubeheal-operator" || echo "")
+    if [[ -n "$matching_roles" ]]; then
+        clusterrole_found=true
+        local role_count
+        role_count=$(echo "$matching_roles" | wc -l)
+        record_result "T1.7-clusterrole-exists" "PASSED" "$role_count ClusterRoles found matching kubeheal-operator"
+    fi
     if ! $clusterrole_found; then
-        local matching_roles
-        matching_roles=$(oc get clusterrole -o name 2>/dev/null | grep -i "kubeheal" || echo "none found")
-        record_result "T1.7-clusterrole-exists" "FAILED" "tried kubeheal-operator-manager-role and manager-role; matching: $matching_roles"
+        record_result "T1.7-clusterrole-exists" "FAILED" "no ClusterRoles matching kubeheal-operator found"
     fi
 
     log_info "Tier 1 complete."
@@ -354,6 +353,9 @@ spec:
     enabled: false
 
   alerts:
+    enabled: false
+
+  consolePlugins:
     enabled: false
 EOF
 

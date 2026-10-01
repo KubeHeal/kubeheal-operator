@@ -102,12 +102,12 @@ metadata:
     capabilities: Basic Install
     categories: AI/Machine Learning,Monitoring
     containerImage: quay.io/takinosh/kubeheal-operator:v0.1.0
-    createdAt: "2026-10-01T18:14:35Z"
+    createdAt: "2026-10-01T19:18:09Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: helm.sdk.operatorframework.io/v1
     repository: https://github.com/KubeHeal/kubeheal-operator
     support: KubeHeal Community
-  name: kubeheal-operator.v0.1.1
+  name: kubeheal-operator.v0.1.6
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -272,12 +272,6 @@ spec:
           verbs:
           - '*'
         - apiGroups:
-          - operator.external-secrets.io
-          resources:
-          - externalsecretsconfigs
-          verbs:
-          - '*'
-        - apiGroups:
           - operators.coreos.com
           resources:
           - subscriptions
@@ -356,6 +350,22 @@ spec:
           verbs:
           - '*'
         - apiGroups:
+          - operator.openshift.io
+          resources:
+          - consoles
+          verbs:
+          - get
+          - list
+          - watch
+          - patch
+          - update
+        - apiGroups:
+          - operator.openshift.io
+          resources:
+          - externalsecretsconfigs
+          verbs:
+          - '*'
+        - apiGroups:
           - networking.k8s.io
           resources:
           - networkpolicies
@@ -403,7 +413,7 @@ spec:
                 - --leader-elect
                 - --leader-election-id=kubeheal-operator
                 - --health-probe-bind-address=:8081
-                image: quay.io/takinosh/kubeheal-operator:v0.1.1
+                image: quay.io/takinosh/kubeheal-operator:v0.1.6
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -420,10 +430,10 @@ spec:
                 resources:
                   limits:
                     cpu: 500m
-                    memory: 128Mi
+                    memory: 512Mi
                   requests:
                     cpu: 10m
-                    memory: 64Mi
+                    memory: 128Mi
                 securityContext:
                   allowPrivilegeEscalation: false
                   capabilities:
@@ -500,4 +510,4 @@ spec:
   provider:
     name: KubeHeal
     url: https://github.com/KubeHeal
-  version: 0.1.1
+  version: 0.1.6
