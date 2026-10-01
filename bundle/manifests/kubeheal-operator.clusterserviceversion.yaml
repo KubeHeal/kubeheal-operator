@@ -25,6 +25,9 @@ metadata:
               "logLevel": "info",
               "replicas": 1
             },
+            "dataScienceCluster": {
+              "enabled": true
+            },
             "features": {
               "aiml": true
             },
@@ -99,12 +102,12 @@ metadata:
     capabilities: Basic Install
     categories: AI/Machine Learning,Monitoring
     containerImage: quay.io/takinosh/kubeheal-operator:v0.1.0
-    createdAt: "2026-09-18T19:58:13Z"
+    createdAt: "2026-10-01T18:14:35Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: helm.sdk.operatorframework.io/v1
     repository: https://github.com/KubeHeal/kubeheal-operator
     support: KubeHeal Community
-  name: kubeheal-operator.v0.1.0
+  name: kubeheal-operator.v0.1.1
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -295,6 +298,18 @@ spec:
           verbs:
           - '*'
         - apiGroups:
+          - datasciencecluster.opendatahub.io
+          resources:
+          - datascienceclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
           - build.openshift.io
           resources:
           - buildconfigs
@@ -312,6 +327,38 @@ spec:
           - kubeheal.io
           resources:
           - notebookvalidationjobs
+          verbs:
+          - '*'
+        - apiGroups:
+          - nvidia.com
+          resources:
+          - clusterpolicies
+          verbs:
+          - '*'
+        - apiGroups:
+          - nfd.openshift.io
+          resources:
+          - nodefeaturediscoveries
+          verbs:
+          - '*'
+        - apiGroups:
+          - apiextensions.k8s.io
+          resources:
+          - customresourcedefinitions
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - console.openshift.io
+          resources:
+          - consoleplugins
+          verbs:
+          - '*'
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
           verbs:
           - '*'
         - apiGroups:
@@ -356,7 +403,7 @@ spec:
                 - --leader-elect
                 - --leader-election-id=kubeheal-operator
                 - --health-probe-bind-address=:8081
-                image: quay.io/takinosh/kubeheal-operator:v0.1.0
+                image: quay.io/takinosh/kubeheal-operator:v0.1.1
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -453,4 +500,4 @@ spec:
   provider:
     name: KubeHeal
     url: https://github.com/KubeHeal
-  version: 0.1.0
+  version: 0.1.1

@@ -332,7 +332,7 @@ spec:
 
   nodeConfig:
     gpu:
-      enabled: false
+      enabled: true
     storage:
       enabled: false
 
