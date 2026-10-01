@@ -180,6 +180,20 @@ rules:
   verbs:
   - "*"
 
+# RHOAI DataScienceCluster (enables KServe, workbenches, etc.)
+- apiGroups:
+  - datasciencecluster.opendatahub.io
+  resources:
+  - datascienceclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
 # OpenShift Build
 - apiGroups:
   - build.openshift.io

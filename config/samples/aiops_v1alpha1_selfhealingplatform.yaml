@@ -35,6 +35,9 @@ spec:
   modelServing:
     enabled: true
 
+  dataScienceCluster:
+    enabled: true
+
   models:
     - name: anomaly-detector
       cpu: "500m"
