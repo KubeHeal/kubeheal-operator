@@ -220,4 +220,46 @@ rules:
   verbs:
   - "*"
 
+# NVIDIA GPU Operator (ClusterPolicy CRs)
+- apiGroups:
+  - nvidia.com
+  resources:
+  - clusterpolicies
+  verbs:
+  - "*"
+
+# NFD Operator (NodeFeatureDiscovery CRs)
+- apiGroups:
+  - nfd.openshift.io
+  resources:
+  - nodefeaturediscoveries
+  verbs:
+  - "*"
+
+# CRD listing (required by Helm to validate custom resources)
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+
+# Console plugins (OpenShift console customisation)
+- apiGroups:
+  - console.openshift.io
+  resources:
+  - consoleplugins
+  verbs:
+  - "*"
+
+# Networking (NetworkPolicy)
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - "*"
+
 # +kubebuilder:scaffold:rules

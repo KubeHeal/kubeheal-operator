@@ -156,6 +156,10 @@ preflight_checks() {
 tier1_olm_install() {
     log_section "Tier 1: OLM Bundle Installation"
 
+    # Pre-create namespace for the operator
+    log_info "Creating operator namespace: $OPERATOR_NAMESPACE"
+    oc create namespace "$OPERATOR_NAMESPACE" --dry-run=client -o yaml | oc apply -f - 2>/dev/null
+
     # Test 1.1: Install operator via OLM bundle
     log_info "Installing operator via: operator-sdk run bundle $BUNDLE_IMG"
     if operator-sdk run bundle "$BUNDLE_IMG" \
@@ -229,7 +233,8 @@ tier1_olm_install() {
     # Test 1.6: Operator logs are clean (no crash/panic)
     local error_count
     error_count=$(oc logs -n "$OPERATOR_NAMESPACE" -l control-plane=controller-manager \
-        --tail=50 2>/dev/null | grep -ciE "panic|fatal|crash" || echo "0")
+        --tail=50 2>/dev/null | grep -ciE "panic|fatal|crash" || true)
+    error_count="${error_count:-0}"
     if [[ "$error_count" -eq 0 ]]; then
         record_result "T1.6-operator-logs-clean" "PASSED" "no panics/fatals in last 50 lines"
     else
@@ -237,11 +242,19 @@ tier1_olm_install() {
         oc logs -n "$OPERATOR_NAMESPACE" -l control-plane=controller-manager --tail=20 2>/dev/null || true
     fi
 
-    # Test 1.7: RBAC - ClusterRole exists
-    if oc get clusterrole kubeheal-operator-manager-role &>/dev/null; then
-        record_result "T1.7-clusterrole-exists" "PASSED" "kubeheal-operator-manager-role"
-    else
-        record_result "T1.7-clusterrole-exists" "FAILED" "ClusterRole not found"
+    # Test 1.7: RBAC - ClusterRole exists (OLM may prefix with operator name)
+    local clusterrole_found=false
+    for cr_name in "kubeheal-operator-manager-role" "manager-role"; do
+        if oc get clusterrole "$cr_name" &>/dev/null 2>&1; then
+            clusterrole_found=true
+            record_result "T1.7-clusterrole-exists" "PASSED" "$cr_name"
+            break
+        fi
+    done
+    if ! $clusterrole_found; then
+        local matching_roles
+        matching_roles=$(oc get clusterrole -o name 2>/dev/null | grep -i "kubeheal" || echo "none found")
+        record_result "T1.7-clusterrole-exists" "FAILED" "tried kubeheal-operator-manager-role and manager-role; matching: $matching_roles"
     fi
 
     log_info "Tier 1 complete."
@@ -316,6 +329,12 @@ spec:
 
   features:
     aiml: false
+
+  nodeConfig:
+    gpu:
+      enabled: false
+    storage:
+      enabled: false
 
   namespace:
     create: true
@@ -508,7 +527,8 @@ tier3_cleanup() {
 
     # Test 3.5: CSV removed
     local remaining_csv
-    remaining_csv=$(oc get csv -n "$OPERATOR_NAMESPACE" --no-headers 2>/dev/null | grep -c "kubeheal" || echo "0")
+    remaining_csv=$(oc get csv -n "$OPERATOR_NAMESPACE" --no-headers 2>/dev/null | grep -c "kubeheal" || true)
+    remaining_csv="${remaining_csv:-0}"
     if [[ "$remaining_csv" -eq 0 ]]; then
         record_result "T3.5-csv-removed" "PASSED"
     else
