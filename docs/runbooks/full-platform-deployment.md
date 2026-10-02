@@ -37,7 +37,7 @@ and automated secrets management.
 
 After completion:
 - Five prerequisite operators installed and healthy
-- KubeHeal operator v0.1.7 running
+- KubeHeal operator v0.1.10 running
 - `SelfHealingPlatform` CR fully reconciled with all 18 CRD-gated resource types active
 - Coordination Engine, MCP Server, KServe models, Tekton pipelines, and Jupyter workbench deployed
 - Monitoring (ServiceMonitor, PrometheusRule) active
@@ -58,6 +58,63 @@ installation. If you only need the operator without prerequisites, use that runb
 ---
 
 ## Prerequisites
+
+### Cluster Sizing Requirements
+
+The platform deploys RHOAI (~18 pods), Tekton (~18 pods), GPU Operator, cert-manager,
+and the KubeHeal components. Worker nodes must have enough CPU and memory to run all
+operators plus user workloads (notebooks, model training, inference).
+
+#### Minimum Cluster Sizing
+
+| Component | ROSA HA (Recommended) | ROSA Single-Worker | SNO |
+|-----------|:-----:|:-----:|:-----:|
+| **Control Plane** | 3x managed (ROSA) | 3x managed (ROSA) | 1 node (all roles) |
+| **Worker Nodes** | 2x `m5.2xlarge` | 1x `m5.2xlarge` | N/A |
+| **Worker CPU** | 8 cores per node | 8 cores | 16+ cores |
+| **Worker RAM** | 32 GB per node | 32 GB | 64+ GB |
+| **GPU Nodes** | 1x `g5.2xlarge` (optional) | N/A | N/A |
+| **Total Worker CPU** | 16+ cores | 8 cores | 16+ cores |
+
+> **⚠️ WARNING: `m5.xlarge` (4 CPU / 16 GB) is too small.**
+> Tested on 2x `m5.xlarge` workers: RHOAI and Tekton alone consumed 93-97% of CPU
+> requests, leaving no capacity for the KubeHeal platform or user workloads.
+> The RHOAI webhook controller could not schedule, blocking Notebook CR creation.
+
+#### Recommended Cluster Sizing (Full Features + GPU)
+
+| Component | Instance Type | Count | CPU | RAM |
+|-----------|--------------|:-----:|:---:|:---:|
+| Workers | `m5.2xlarge` | 2 | 16 cores | 64 GB |
+| GPU | `g5.2xlarge` | 1 | 8 cores + 1 GPU | 32 GB |
+| **Total** | | **3** | **24 cores** | **96 GB** |
+
+Use the automated provisioning script to create a correctly-sized cluster:
+
+```bash
+# Full HA cluster with GPU (recommended)
+./scripts/create-rosa-cluster.sh
+
+# This creates: 3x m5.2xlarge workers + 1x g5.2xlarge GPU + S3 bucket
+```
+
+#### CPU Budget Breakdown
+
+Approximate CPU requests across the platform stack:
+
+| Component | Pods | CPU Requests |
+|-----------|:----:|:----------:|
+| RHOAI (KServe, dashboard, DSP, notebook controller) | ~18 | ~1500m |
+| Tekton (controller, webhook, chains, triggers, results) | ~18 | ~1200m |
+| KubeHeal (coordination engine, MCP server) | 2 | ~400m |
+| JNV operator | 1 | ~100m |
+| cert-manager | 2 | ~100m |
+| Platform overhead (monitoring, DNS, ingress, OVN) | ~15 | ~1200m |
+| User workloads (notebooks, training, inference) | 5-10 | ~2000m |
+| **Total** | | **~6500m** |
+
+Two `m5.2xlarge` workers provide ~13 allocatable cores (after system reservations),
+which gives ~50% headroom above the base platform load.
 
 ### Required Access and Permissions
 
@@ -403,7 +460,7 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.7
+  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.10
   displayName: KubeHeal Operator
   publisher: KubeHeal Community
   updateStrategy:
@@ -563,11 +620,16 @@ EOF
 
 ---
 
-#### Step 9: Grant Prometheus Monitoring Access
+#### Step 9: ~~Grant Prometheus Monitoring Access~~ (No Longer Required)
 
-The Coordination Engine and MCP Server init containers wait for Prometheus to be
-reachable. On ROSA and managed clusters, the platform ServiceAccount needs the
-`cluster-monitoring-view` ClusterRole.
+> **Note**: As of v0.1.8, the Helm chart creates the Prometheus ClusterRoleBinding
+> automatically (`self-healing-operator-prometheus`). This step is no longer needed.
+> It is retained here for reference only.
+>
+> If you are running v0.1.7 or earlier, apply the manual ClusterRoleBinding below.
+
+<details>
+<summary>Manual step for v0.1.7 or earlier (click to expand)</summary>
 
 ```bash
 cat <<'EOF' | oc apply -f -
@@ -589,17 +651,7 @@ subjects:
 EOF
 ```
 
-**Verification**:
-
-```bash
-oc get clusterrolebinding kubeheal-prometheus-reader
-```
-
-Pass criteria: The ClusterRoleBinding exists.
-
-> **Note**: Without this step, the Coordination Engine stays in `Init:0/1`
-> (waiting for Prometheus), and the MCP Server stays in `Init:0/2`
-> (waiting for the Coordination Engine).
+</details>
 
 ---
 
@@ -1003,7 +1055,7 @@ Solid resources render on every cluster.
 | NVIDIA GPU Operator | `v26.7` | 26.7.x |
 | cert-manager | `stable-v1` | 1.x |
 | ODF | `stable-4.22` | 4.22.x |
-| KubeHeal Operator | `alpha` | 0.1.7 |
+| KubeHeal Operator | `alpha` | 0.1.10 |
 
 ### Related Documentation
 
@@ -1016,7 +1068,7 @@ Solid resources render on every cluster.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0.0 | 2026-10-02 | KubeHeal | Initial version. Tested on ROSA OCP 4.22.15 with v0.1.7. |
+| 1.0.0 | 2026-10-02 | KubeHeal | Initial version. Tested on ROSA OCP 4.22.15 with v0.1.10. |
 
 ---
 

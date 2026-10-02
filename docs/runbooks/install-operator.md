@@ -139,7 +139,7 @@ previous installation.
 ### Check 4: Verify Quay.io Image Access
 
 ```bash
-oc run test-pull --image=quay.io/takinosh/kubeheal-operator:v0.1.7 \
+oc run test-pull --image=quay.io/takinosh/kubeheal-operator:v0.1.10 \
   --restart=Never --command -- sleep 1 2>&1
 oc delete pod test-pull --ignore-not-found
 ```
@@ -181,7 +181,7 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.7
+  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.10
   displayName: KubeHeal Operator
   publisher: KubeHeal Community
   updateStrategy:
@@ -256,7 +256,7 @@ subscription.operators.coreos.com/kubeheal-operator created
 oc get csv -n kubeheal-system --watch
 ```
 
-Pass criteria: `kubeheal-operator.v0.1.7` shows `Succeeded` within 120 seconds.
+Pass criteria: `kubeheal-operator.v0.1.10` shows `Succeeded` within 120 seconds.
 
 **Verify the operator pod is running**:
 
@@ -619,10 +619,10 @@ oc get proxy/cluster -o jsonpath='{.spec.httpProxy}'
 
 **Symptoms**: The CR condition message lists CRDs that are not installed.
 
-**Root Cause**: This occurred in operator versions before v0.1.7. Earlier versions did not
+**Root Cause**: This occurred in operator versions before v0.1.10. Earlier versions did not
 have Helm `lookup` gates for all CRD types.
 
-**Solution**: Verify you are running v0.1.7 or later.
+**Solution**: Verify you are running v0.1.10 or later.
 
 ```bash
 oc get csv -n kubeheal-system -o jsonpath='{.items[0].spec.version}'
@@ -639,7 +639,7 @@ If the version is older, update the CatalogSource image tag and recreate the sub
 **Root Cause**: This occurred in operator versions before v0.1.2. The memory limit was
 128Mi, which is too small for the 1000+ line Helm chart.
 
-**Solution**: Version v0.1.7 sets memory limits to 512Mi. Upgrade to the latest version.
+**Solution**: Version v0.1.10 sets memory limits to 512Mi. Upgrade to the latest version.
 
 ---
 
@@ -763,7 +763,7 @@ and the operator that provides it.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0.0 | 2026-10-02 | KubeHeal | Initial version. Tested on ROSA OCP 4.22.15 with v0.1.7. |
+| 1.0.0 | 2026-10-02 | KubeHeal | Initial version. Tested on ROSA OCP 4.22.15 with v0.1.10. |
 
 ---
 
