@@ -699,10 +699,11 @@ notebooks:
     enableSyncWaves: true
 
     # Operator deployment method: "olm" or "helm"
-    # - "olm": Operator installed via OperatorHub/OLM (recommended for production)
+    # - "olm": Operator installed via OperatorHub/OLM (user manages separately)
     #          Helm chart only creates NotebookValidationJob CRs
-    # - "helm": Operator deployed by this Helm chart (for development/testing)
-    operatorDeploymentMethod: "olm"
+    # - "helm": Operator deployed by this Helm chart (default for operator path)
+    #          Includes Namespace, RBAC, cert-manager certs, and Deployment
+    operatorDeploymentMethod: "helm"
 
     # Operator image (only used when operatorDeploymentMethod: "helm")
     # v1.0.6 includes: ArgoCD integration, model validation, exit code validation, advanced comparison, GPU tolerations

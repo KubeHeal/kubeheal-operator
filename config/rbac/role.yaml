@@ -276,4 +276,13 @@ rules:
   verbs:
   - "*"
 
+# cert-manager (Issuer, Certificate for JNV webhook certs)
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - issuers
+  - certificates
+  verbs:
+  - "*"
+
 # +kubebuilder:scaffold:rules
