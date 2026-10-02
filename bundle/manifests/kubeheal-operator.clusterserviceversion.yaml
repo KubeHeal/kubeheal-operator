@@ -101,7 +101,7 @@ metadata:
       ]
     capabilities: Basic Install
     categories: AI/Machine Learning,Monitoring
-    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.0
+    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.6
     createdAt: "2026-10-01T19:18:09Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: helm.sdk.operatorframework.io/v1
