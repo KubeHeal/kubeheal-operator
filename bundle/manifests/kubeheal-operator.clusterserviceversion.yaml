@@ -101,13 +101,13 @@ metadata:
       ]
     capabilities: Basic Install
     categories: AI/Machine Learning,Monitoring
-    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.6
-    createdAt: "2026-10-01T19:18:09Z"
+    containerImage: quay.io/takinosh/kubeheal-operator:v0.1.7
+    createdAt: "2026-10-02T22:36:48Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: helm.sdk.operatorframework.io/v1
     repository: https://github.com/KubeHeal/kubeheal-operator
     support: KubeHeal Community
-  name: kubeheal-operator.v0.1.6
+  name: kubeheal-operator.v0.1.7
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -413,7 +413,7 @@ spec:
                 - --leader-elect
                 - --leader-election-id=kubeheal-operator
                 - --health-probe-bind-address=:8081
-                image: quay.io/takinosh/kubeheal-operator:v0.1.6
+                image: quay.io/takinosh/kubeheal-operator:v0.1.7
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -510,4 +510,4 @@ spec:
   provider:
     name: KubeHeal
     url: https://github.com/KubeHeal
-  version: 0.1.6
+  version: 0.1.7
