@@ -47,13 +47,67 @@ See [`config/samples/aiops_v1alpha1_selfhealingplatform_baremetal.yaml`](config/
 
 ## Quick Start
 
+> **Full installation runbook**: [docs/runbooks/install-operator.md](docs/runbooks/install-operator.md)
+> provides copy-pasteable commands, pre-flight checks, verification steps, rollback
+> instructions, and a troubleshooting guide. The runbook was validated on ROSA OCP 4.22.15.
+
+### From CatalogSource (Recommended)
+
+```bash
+# 1. Create namespace and catalog
+oc create namespace kubeheal-system
+
+cat <<'EOF' | oc apply -f -
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: kubeheal-operator-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.7
+  displayName: KubeHeal Operator
+  publisher: KubeHeal Community
+EOF
+
+# 2. Install via OLM
+cat <<'EOF' | oc apply -f -
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: kubeheal-operator-group
+  namespace: kubeheal-system
+spec:
+  targetNamespaces:
+  - kubeheal-system
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: kubeheal-operator
+  namespace: kubeheal-system
+spec:
+  channel: alpha
+  name: kubeheal-operator
+  source: kubeheal-operator-catalog
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+EOF
+
+# 3. Wait for operator
+oc get csv -n kubeheal-system --watch
+
+# 4. Deploy the platform
+oc apply -f config/samples/aiops_v1alpha1_selfhealingplatform.yaml
+```
+
 ### From OperatorHub (Coming Soon)
 
 1. Search for "KubeHeal" in OperatorHub
 2. Click Install
 3. Create a `SelfHealingPlatform` CR
 
-### Manual Installation
+### Manual Installation (Development)
 
 ```bash
 # Build and push the operator image
