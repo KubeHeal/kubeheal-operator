@@ -112,22 +112,23 @@ rbac:
   roleBindingName: self-healing-operator
 
   # Cluster-scoped RBAC resources (ClusterRole, ClusterRoleBinding)
-  # ⚠️ DISABLED by default for Hybrid Management Model (ADR-030)
-  # These resources are deployed via Ansible prereqs, NOT via ArgoCD
-  # Reason: Namespaced ArgoCD cannot manage cluster-scoped resources
+  # When deployed via the KubeHeal operator, the operator's ClusterRole has
+  # permissions to create ClusterRoles and ClusterRoleBindings, so these are
+  # ENABLED by default.
+  # When deployed via namespaced ArgoCD (VP framework), disable this and use
+  # Ansible prereqs instead (ADR-030).
   clusterScoped:
-    enabled: false
+    enabled: true
 
   # Cross-namespace RBAC (Role/RoleBinding in openshift-monitoring, default, etc.)
-  # ⚠️ DISABLED by default for Hybrid Management Model (ADR-030)
-  # These resources are deployed via Ansible prereqs, NOT via ArgoCD
-  # Reason: Namespaced ArgoCD cannot manage resources in cluster-managed namespaces
-  crossNamespaceEnabled: false
+  # ENABLED by default for operator deployments.
+  # When deployed via namespaced ArgoCD, disable this and use Ansible prereqs.
+  crossNamespaceEnabled: true
 
 # Cluster-scoped RBAC managed externally (by Ansible deploy-prereqs-only)
 # When true, mcp-server-rbac.yaml skips rendering ClusterRole/ClusterRoleBinding
-# resources that namespaced ArgoCD cannot manage (ADR-030)
-clusterRbacManagedExternally: true
+# When false (default for operator path), the Helm chart renders them directly.
+clusterRbacManagedExternally: false
 
 # Storage configuration
 storage:
