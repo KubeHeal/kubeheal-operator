@@ -150,9 +150,25 @@ ocm version          # recommended, not strictly required
 ```bash
 curl -Lo ocm https://github.com/openshift-online/ocm-cli/releases/latest/download/ocm-linux-amd64
 chmod +x ocm && sudo mv ocm /usr/local/bin/
-ocm login --token="<your-offline-token>"
-# Get token from: https://console.redhat.com/openshift/token
 ```
+
+**Authenticate `rosa` and `ocm` CLIs** (SSO-based login):
+
+Red Hat uses SSO for CLI authentication. Choose the method that fits your environment:
+
+```bash
+# Option 1: Browser-based SSO (recommended -- opens a browser window)
+rosa login
+ocm login --use-auth-code
+
+# Option 2: Device code flow (for headless / SSH environments)
+ocm login --use-device-code
+# Then open the URL shown and enter the code on any device with a browser
+```
+
+> **Note:** The legacy `--token=<offline-token>` flag still works but Red Hat
+> recommends SSO login. If you must use a token, get one from
+> https://console.redhat.com/openshift/token.
 
 ### MANDATORY: OCM Role Linked to AWS Account (ROSA Only)
 
