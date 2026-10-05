@@ -9,7 +9,7 @@ metadata:
           "kind": "SelfHealingPlatform",
           "metadata": {
             "name": "kubeheal",
-            "namespace": "self-healing-platform"
+            "namespace": "kubeheal-system"
           },
           "spec": {
             "cluster": {
@@ -510,8 +510,8 @@ spec:
   - name: Source Code
     url: https://github.com/KubeHeal/kubeheal-operator
   maintainers:
-  - email: tosin@kubeheal.io
-    name: Platform Team
+  - email: takinosh@redhat.com
+    name: KubeHeal Community
   maturity: alpha
   minKubeVersion: 1.27.0
   provider:
