@@ -10,8 +10,9 @@ home: https://github.com/KubeHeal/openshift-aiops-platform
 sources:
   - https://github.com/KubeHeal/openshift-aiops-platform
 maintainers:
-  - name: Platform Team
-    email: platform-team@example.com
+  - name: KubeHeal Community
+    email: takinosh@redhat.com
+    url: https://github.com/KubeHeal
 
 # Keywords for searching
 keywords:
@@ -33,7 +34,7 @@ annotations:
 
   # OpenShift specific
   openshift.io/display-name: "Self-Healing Platform"
-  openshift.io/documentation: "https://github.com/openshift-aiops/self-healing-platform/docs"
+  openshift.io/documentation: "https://github.com/KubeHeal/kubeheal-operator/tree/main/docs"
 
   # Operator Hub metadata
   operatorhub.io/ui-metadata-max-k8s-version: "1.34"

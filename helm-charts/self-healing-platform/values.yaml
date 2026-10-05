@@ -20,7 +20,7 @@ git:
   # Git credentials
   credentials:
     username: user1
-    password: changeme
+    password: ""
 
 # Gitea configuration (self-hosted Git mirror)
 # Set gitea.enabled: true when using a self-hosted Gitea instance
@@ -115,8 +115,8 @@ rbac:
   # When deployed via the KubeHeal operator, the operator's ClusterRole has
   # permissions to create ClusterRoles and ClusterRoleBindings, so these are
   # ENABLED by default.
-  # When deployed via namespaced ArgoCD (VP framework), disable this and use
-  # Ansible prereqs instead (ADR-030).
+  # When deployed via namespaced ArgoCD, disable this and use
+  # external RBAC management instead (ADR-030).
   clusterScoped:
     enabled: true
 
@@ -578,7 +578,7 @@ notebookValidation:
     # Repository URL for notebook validation tests
     # For Gitea: https://gitea-with-admin-gitea.apps.<cluster>/org/repo.git
     # For GitHub: https://github.com/org/repo
-    repoURL: "https://gitea-with-admin-gitea.apps.cluster-pvbs6.pvbs6.sandbox3005.opentlc.com/takinosh/openshift-aiops-platform.git"
+    repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
     # Branch or tag to use
     ref: "main"
     # Context directory for notebooks (optional)

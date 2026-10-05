@@ -1,8 +1,26 @@
+# Single Node OpenShift (SNO) -- Reduced resources (full-featured)
+#
+# This is the full-featured sample with all configurable fields shown.
+# For a minimal starting point, see the inline CRs in
+# docs/runbooks/install-operator.md (Step 4, Option C).
+#
+# For Single Node OpenShift or ROSA single-worker clusters.
+# Uses gp3-csi storage and disables GPU workloads by default.
+#
+# Prerequisites:
+#   - OpenShift 4.20+ (SNO topology)
+#   - Red Hat OpenShift AI (RHOAI) installed
+#   - OpenShift Pipelines (Tekton) installed
+#
+# Usage:
+#   oc apply -f aiops_v1alpha1_selfhealingplatform_sno.yaml
 apiVersion: aiops.kubeheal.io/v1alpha1
 kind: SelfHealingPlatform
 metadata:
+  # The CR lives in the operator namespace.
+  # The chart creates self-healing-platform for workloads.
   name: kubeheal
-  namespace: self-healing-platform
+  namespace: kubeheal-system
 spec:
   cluster:
     topology: "sno"
@@ -13,6 +31,8 @@ spec:
     version: "1.0.0"
     namespace: "self-healing-platform"
     git:
+      # Used by Tekton pipelines for notebook source code, not by the operator itself.
+      # Change to your fork if customizing notebooks.
       repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
       revision: "main"
 

@@ -274,6 +274,41 @@ oc logs -n kubeheal-system deployment/kubeheal-operator-controller-manager --tai
 
 ---
 
+### Step 3b: Create an S3 Bucket (ROSA / AWS Only)
+
+> **Skip this step** if you use `objectStore.backend: "noobaa"` (baremetal, air-gapped).
+
+The platform stores trained model artifacts in S3. Create a bucket before applying the CR.
+
+```bash
+REGION="us-east-1"
+BUCKET_NAME="kubeheal-model-storage-$(oc whoami --show-server | md5sum | cut -c1-8)"
+
+aws s3api create-bucket \
+  --bucket "${BUCKET_NAME}" \
+  --region "${REGION}" \
+  --create-bucket-configuration LocationConstraint="${REGION}"
+
+echo "Bucket created: ${BUCKET_NAME}"
+```
+
+For static credentials (development only):
+
+```bash
+oc create secret generic aws-s3-credentials-source \
+  --from-literal=AWS_ACCESS_KEY_ID="<your-key>" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="<your-secret>" \
+  -n kubeheal-system
+```
+
+> **Tip:** The platform repo's
+> [`scripts/create-rosa-cluster.sh`](https://github.com/KubeHeal/openshift-aiops-platform/blob/main/scripts/create-rosa-cluster.sh)
+> creates the cluster, S3 bucket, and GPU machine pool in one command.
+
+Use the bucket name when filling in `objectStore.aws.bucketName` in Step 4 below.
+
+---
+
 ### Step 4: Choose and Apply a SelfHealingPlatform CR
 
 Select the CR that matches your cluster platform. Three sample CRs are provided in
@@ -434,7 +469,7 @@ metadata:
   name: rhods-operator
   namespace: redhat-ods-operator
 spec:
-  channel: stable
+  channel: stable-3.x
   name: rhods-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
@@ -758,6 +793,39 @@ and the operator that provides it.
 - [KubeHeal Operator Repository](https://github.com/KubeHeal/kubeheal-operator)
 - [OpenShift AIOps Platform Repository](https://github.com/KubeHeal/openshift-aiops-platform)
 - [ADR-065: Baremetal Compatibility](https://github.com/KubeHeal/openshift-aiops-platform/blob/main/docs/adrs/065-baremetal-agent-based-install-compatibility.md)
+
+### Next Steps
+
+Once the operator is running and the CR shows `Deployed=True`:
+
+1. **Install prerequisite operators** (if not already done): Follow the
+   [full platform deployment runbook](full-platform-deployment.md) Steps 1-6.
+
+2. **Start a model training pipeline** (requires Tekton):
+
+   ```bash
+   tkn pipeline start model-training-pipeline \
+     -p model-name=anomaly-detector \
+     -p notebook-path=notebooks/02-anomaly-detection/01-isolation-forest-implementation.ipynb \
+     -p data-source=prometheus \
+     -p training-hours=168 \
+     -p inference-service-name=anomaly-detector \
+     -p health-check-enabled=true \
+     -p git-url=https://github.com/KubeHeal/openshift-aiops-platform.git \
+     -p git-ref=main \
+     -n self-healing-platform --showlog
+   ```
+
+3. **Run the deployment validation pipeline**:
+
+   ```bash
+   tkn pipeline start deployment-validation-pipeline \
+     -n self-healing-platform --showlog
+   ```
+
+4. **Explore the platform**: See the
+   [OpenShift AIOps Platform README](https://github.com/KubeHeal/openshift-aiops-platform)
+   for notebooks, MCP server integration, and end-to-end self-healing scenarios.
 
 ### Version History
 

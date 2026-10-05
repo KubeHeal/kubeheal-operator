@@ -1,8 +1,26 @@
+# ROSA / AWS HA -- Default configuration (full-featured)
+#
+# This is the full-featured sample with all configurable fields shown.
+# For a minimal starting point, see the inline CRs in
+# docs/runbooks/install-operator.md (Step 4, Option A).
+#
+# For ROSA Classic HA, AWS IPI, or any multi-node OpenShift cluster with
+# AWS S3 as the object-store backend (default).
+#
+# Prerequisites:
+#   - OpenShift 4.20+ (HA topology)
+#   - Red Hat OpenShift AI (RHOAI) installed
+#   - OpenShift Pipelines (Tekton) installed
+#
+# Usage:
+#   oc apply -f aiops_v1alpha1_selfhealingplatform.yaml
 apiVersion: aiops.kubeheal.io/v1alpha1
 kind: SelfHealingPlatform
 metadata:
+  # The CR lives in the operator namespace.
+  # The chart creates self-healing-platform for workloads.
   name: kubeheal
-  namespace: self-healing-platform
+  namespace: kubeheal-system
 spec:
   cluster:
     topology: "ha"
@@ -14,6 +32,8 @@ spec:
     namespace: "self-healing-platform"
     imagePullPolicy: "IfNotPresent"
     git:
+      # Used by Tekton pipelines for notebook source code, not by the operator itself.
+      # Change to your fork if customizing notebooks.
       repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
       revision: "main"
 
@@ -61,6 +81,10 @@ spec:
 
   objectStore:
     enabled: true
+    backend: "aws-s3"           # ROSA / AWS default; change to "noobaa" for ODF
+    # aws:
+    #   region: "us-east-1"
+    #   bucketName: "your-model-storage-bucket"
 
   monitoring:
     enabled: true

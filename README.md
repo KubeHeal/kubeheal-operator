@@ -8,6 +8,10 @@
 
 # KubeHeal Operator
 
+[![CI](https://github.com/KubeHeal/kubeheal-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/KubeHeal/kubeheal-operator/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/KubeHeal/kubeheal-operator)](https://github.com/KubeHeal/kubeheal-operator/releases)
+
 A Kubernetes operator for deploying and managing the [KubeHeal AIOps Self-Healing Platform](https://github.com/KubeHeal/openshift-aiops-platform) on OpenShift clusters.
 
 ## Overview
@@ -65,7 +69,7 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.7
+  image: quay.io/takinosh/kubeheal-operator-catalog:v0.1.10
   displayName: KubeHeal Operator
   publisher: KubeHeal Community
 EOF
@@ -111,10 +115,10 @@ oc apply -f config/samples/aiops_v1alpha1_selfhealingplatform.yaml
 
 ```bash
 # Build and push the operator image
-make docker-build docker-push IMG=quay.io/takinosh/kubeheal-operator:v0.1.0
+make docker-build docker-push IMG=quay.io/takinosh/kubeheal-operator:v0.1.10
 
 # Deploy the operator
-make deploy IMG=quay.io/takinosh/kubeheal-operator:v0.1.0
+make deploy IMG=quay.io/takinosh/kubeheal-operator:v0.1.10
 
 # Create a SelfHealingPlatform instance
 kubectl apply -f config/samples/aiops_v1alpha1_selfhealingplatform.yaml
@@ -127,7 +131,7 @@ kubectl apply -f config/samples/aiops_v1alpha1_selfhealingplatform.yaml
 make bundle-build bundle-push
 
 # Run the bundle
-operator-sdk run bundle quay.io/takinosh/kubeheal-operator-bundle:v0.1.0
+operator-sdk run bundle quay.io/takinosh/kubeheal-operator-bundle:v0.1.10
 ```
 
 ## Custom Resource
@@ -139,7 +143,7 @@ apiVersion: aiops.kubeheal.io/v1alpha1
 kind: SelfHealingPlatform
 metadata:
   name: kubeheal
-  namespace: self-healing-platform
+  namespace: kubeheal-system
 spec:
   cluster:
     topology: "ha"    # "ha" or "sno"

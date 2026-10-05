@@ -44,7 +44,7 @@ After completion:
 
 ### What This Does NOT Cover
 
-- ROSA cluster provisioning (see `scripts/create-rosa-cluster.sh`)
+- ROSA cluster provisioning (see [`scripts/create-rosa-cluster.sh`](https://github.com/KubeHeal/openshift-aiops-platform/blob/main/scripts/create-rosa-cluster.sh) in the platform repo)
 - S3 bucket creation or IAM credential configuration
 - Model training execution or data pipeline runs
 - Network policies or production TLS hardening
@@ -67,14 +67,18 @@ operators plus user workloads (notebooks, model training, inference).
 
 #### Minimum Cluster Sizing
 
-| Component | ROSA HA (Recommended) | ROSA Single-Worker | SNO |
-|-----------|:-----:|:-----:|:-----:|
-| **Control Plane** | 3x managed (ROSA) | 3x managed (ROSA) | 1 node (all roles) |
-| **Worker Nodes** | 2x `m5.2xlarge` | 1x `m5.2xlarge` | N/A |
-| **Worker CPU** | 8 cores per node | 8 cores | 16+ cores |
-| **Worker RAM** | 32 GB per node | 32 GB | 64+ GB |
-| **GPU Nodes** | 1x `g5.2xlarge` (optional) | N/A | N/A |
-| **Total Worker CPU** | 16+ cores | 8 cores | 16+ cores |
+| Component | ROSA HA (Recommended) | ROSA Single-Worker | Baremetal HA | SNO |
+|-----------|:-----:|:-----:|:-----:|:-----:|
+| **Control Plane** | 3x managed (ROSA) | 3x managed (ROSA) | 3x self-managed | 1 node (all roles) |
+| **Worker Nodes** | 2x `m5.2xlarge` | 1x `m5.2xlarge` | 3+ (8 CPU / 32 GB each) | N/A |
+| **Worker CPU** | 8 cores per node | 8 cores | 8 cores per node | 16+ cores |
+| **Worker RAM** | 32 GB per node | 32 GB | 32 GB per node | 64+ GB |
+| **Raw Disk (ODF)** | N/A | N/A | 100 GB per worker | N/A |
+| **GPU Nodes** | 1x `g5.2xlarge` (optional) | N/A | Optional | N/A |
+| **Total Worker CPU** | 16+ cores | 8 cores | 24+ cores | 16+ cores |
+
+> **Baremetal note:** ODF (Ceph + NooBaa) requires at least 3 nodes with raw block
+> devices. The Local Storage Operator must be installed before ODF. See Step 5b.
 
 > **⚠️ WARNING: `m5.xlarge` (4 CPU / 16 GB) is too small.**
 > Tested on 2x `m5.xlarge` workers: RHOAI and Tekton alone consumed 93-97% of CPU
@@ -89,10 +93,13 @@ operators plus user workloads (notebooks, model training, inference).
 | GPU | `g5.2xlarge` | 1 | 8 cores + 1 GPU | 32 GB |
 | **Total** | | **3** | **24 cores** | **96 GB** |
 
-Use the automated provisioning script to create a correctly-sized cluster:
+Use the automated provisioning script from the
+[platform repo](https://github.com/KubeHeal/openshift-aiops-platform) to create
+a correctly-sized cluster:
 
 ```bash
 # Full HA cluster with GPU (recommended)
+# Run from the openshift-aiops-platform repo clone:
 ./scripts/create-rosa-cluster.sh
 
 # This creates: 3x m5.2xlarge workers + 1x g5.2xlarge GPU + S3 bucket
@@ -376,6 +383,69 @@ EOF
 
 ---
 
+#### Step 5b: Create a StorageCluster (Baremetal Only)
+
+> **Skip this step** if you are on ROSA, AWS IPI, or any cloud platform where you use `aws-s3`.
+
+The ODF operator alone does not provision storage. On baremetal you must create a
+`StorageCluster` CR so that Ceph and NooBaa start. Before doing so, raw block devices
+must be available via the **Local Storage Operator (LSO)**.
+
+**Prerequisites for this step:**
+
+- At least 3 worker nodes with one unused raw disk each (minimum 100 GB per disk).
+- [Local Storage Operator](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/storage/using-local-storage) installed and a `LocalVolumeDiscovery` + `LocalVolumeSet` configured.
+- See the [ODF Planning Guide](https://docs.redhat.com/en/documentation/red_hat_openshift_data_foundation/4.17/html/planning_your_deployment/index) for full hardware requirements.
+
+Once LSO has provided PVs, create the StorageCluster:
+
+```bash
+cat <<'EOF' | oc apply -f -
+apiVersion: ocs.openshift.io/v1
+kind: StorageCluster
+metadata:
+  name: ocs-storagecluster
+  namespace: openshift-storage
+spec:
+  manageNodes: false
+  monDataDirHostPath: /var/lib/rook
+  storageDeviceSets:
+  - name: ocs-deviceset
+    count: 1
+    dataPVCTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: "100Gi"
+        storageClassName: local-storage
+        volumeMode: Block
+    portable: false
+    replica: 3
+EOF
+```
+
+Wait for the StorageCluster and NooBaa to become ready:
+
+```bash
+echo "Waiting for StorageCluster..."
+oc wait --for=jsonpath='{.status.phase}'=Ready \
+  storagecluster/ocs-storagecluster -n openshift-storage --timeout=600s
+
+echo "Waiting for NooBaa..."
+oc wait --for=condition=Available noobaa/noobaa -n openshift-storage --timeout=300s
+```
+
+Pass criteria: Both commands complete without timeout. Storage classes
+`ocs-storagecluster-cephfs` and `openshift-storage.noobaa.io` are now available.
+
+```bash
+oc get storageclass | grep -E "cephfs|noobaa"
+```
+
+---
+
 #### Step 6: Wait for All Prerequisite Operators
 
 All operators install in parallel. Wait for each CSV to reach `Succeeded`.
@@ -522,6 +592,49 @@ Pass criteria: Operator pod is `Running` with `READY=1/1`.
 ---
 
 ### Phase 3: Deploy the Platform
+
+#### Step 7b: Create an S3 Bucket (ROSA / AWS Only)
+
+> **Skip this step** if you use `objectStore.backend: "noobaa"` (baremetal, air-gapped).
+
+The platform stores trained model artifacts in S3. Create a bucket before applying the
+CR so that model training pipelines can upload artifacts immediately.
+
+```bash
+# Set your preferred region and bucket name
+REGION="us-east-1"
+BUCKET_NAME="kubeheal-model-storage-$(oc whoami --show-server | md5sum | cut -c1-8)"
+
+# Create the bucket
+aws s3api create-bucket \
+  --bucket "${BUCKET_NAME}" \
+  --region "${REGION}" \
+  --create-bucket-configuration LocationConstraint="${REGION}"
+
+echo "Bucket created: ${BUCKET_NAME}"
+```
+
+If your ROSA cluster uses **IRSA (IAM Roles for Service Accounts)**, no static
+credentials are needed — set `objectStore.aws.irsaRoleArn` in the CR instead.
+
+For **static credentials** (development only):
+
+```bash
+# Create a credentials secret the chart can reference
+oc create secret generic aws-s3-credentials-source \
+  --from-literal=AWS_ACCESS_KEY_ID="<your-key>" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="<your-secret>" \
+  -n kubeheal-system
+```
+
+> **Tip:** The platform repo's
+> [`scripts/create-rosa-cluster.sh`](https://github.com/KubeHeal/openshift-aiops-platform/blob/main/scripts/create-rosa-cluster.sh)
+> creates the cluster, an S3 bucket, and a GPU machine pool in one command.
+
+Use the bucket name you created when filling in `objectStore.aws.bucketName` in Step 8
+below.
+
+---
 
 #### Step 8: Apply the SelfHealingPlatform CR
 
@@ -1063,6 +1176,57 @@ Solid resources render on every cluster.
 - [KubeHeal Operator Repository](https://github.com/KubeHeal/kubeheal-operator)
 - [OpenShift AIOps Platform Repository](https://github.com/KubeHeal/openshift-aiops-platform)
 - [CLAUDE.md Quick Reference](https://github.com/KubeHeal/openshift-aiops-platform/blob/main/CLAUDE.md)
+
+### Next Steps
+
+Once the full platform is deployed and all checks pass:
+
+1. **Start the anomaly detection model training pipeline**:
+
+   ```bash
+   tkn pipeline start model-training-pipeline \
+     -p model-name=anomaly-detector \
+     -p notebook-path=notebooks/02-anomaly-detection/01-isolation-forest-implementation.ipynb \
+     -p data-source=prometheus \
+     -p training-hours=168 \
+     -p inference-service-name=anomaly-detector \
+     -p health-check-enabled=true \
+     -p git-url=https://github.com/KubeHeal/openshift-aiops-platform.git \
+     -p git-ref=main \
+     -n self-healing-platform --showlog
+   ```
+
+2. **Start the GPU-based predictive analytics pipeline** (if GPU node available):
+
+   ```bash
+   tkn pipeline start model-training-pipeline-gpu \
+     -p model-name=predictive-analytics \
+     -p notebook-path=notebooks/02-anomaly-detection/05-predictive-analytics-kserve.ipynb \
+     -p data-source=prometheus \
+     -p training-hours=720 \
+     -p inference-service-name=predictive-analytics \
+     -p health-check-enabled=true \
+     -p git-url=https://github.com/KubeHeal/openshift-aiops-platform.git \
+     -p git-ref=main \
+     -n self-healing-platform --showlog
+   ```
+
+3. **Run the deployment validation pipeline** (26 checks):
+
+   ```bash
+   tkn pipeline start deployment-validation-pipeline \
+     -n self-healing-platform --showlog
+   ```
+
+4. **Access the Jupyter workbench** for interactive ML development:
+
+   ```bash
+   oc port-forward self-healing-workbench-0 8888:8888 -n self-healing-platform
+   # Open http://localhost:8888
+   ```
+
+5. **Explore MCP integration** with OpenShift Lightspeed: See the
+   [platform repo notebooks](https://github.com/KubeHeal/openshift-aiops-platform/tree/main/notebooks/06-mcp-lightspeed-integration).
 
 ### Version History
 

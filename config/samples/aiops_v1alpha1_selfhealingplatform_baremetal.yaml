@@ -1,4 +1,8 @@
-# Baremetal / Agent-Based Install -- ODF storage backend
+# Baremetal / Agent-Based Install -- ODF storage backend (full-featured)
+#
+# This is the full-featured sample with all configurable fields shown.
+# For a minimal starting point, see the inline CRs in
+# docs/runbooks/install-operator.md (Step 4, Option B).
 #
 # For OpenShift clusters installed on physical servers via Agent-Based
 # Installer, IPI-baremetal, or UPI.  Uses ODF (OpenShift Data Foundation)
@@ -12,11 +16,15 @@
 #
 # For external S3 (MinIO, Ceph RADOS Gateway) instead of ODF, see
 # the inline comments below for the objectStore override.
+#
+# Last tested: OCP 4.22, chart v0.1.10 (Tier 2 -- community-maintained)
 apiVersion: aiops.kubeheal.io/v1alpha1
 kind: SelfHealingPlatform
 metadata:
+  # The CR lives in the operator namespace.
+  # The chart creates self-healing-platform for workloads.
   name: kubeheal
-  namespace: self-healing-platform
+  namespace: kubeheal-system
 spec:
   cluster:
     topology: "ha"
@@ -27,6 +35,8 @@ spec:
     version: "1.0.0"
     namespace: "self-healing-platform"
     git:
+      # Used by Tekton pipelines for notebook source code, not by the operator itself.
+      # Change to your fork if customizing notebooks.
       repoURL: "https://github.com/KubeHeal/openshift-aiops-platform.git"
       revision: "main"
 

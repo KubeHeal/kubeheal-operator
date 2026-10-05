@@ -43,7 +43,8 @@ jobs:
 
       - name: Generate and validate bundle
         run: |
-          make bundle IMG=${{ env.IMAGE_TAG_BASE }}:latest VERSION=0.1.0 CHANNELS=alpha DEFAULT_CHANNEL=alpha
+          VERSION=$(grep '^VERSION ?=' Makefile | awk '{print $$3}')
+          make bundle IMG=${{ env.IMAGE_TAG_BASE }}:latest VERSION=${VERSION} CHANNELS=alpha DEFAULT_CHANNEL=alpha
           operator-sdk bundle validate ./bundle
 
   release:

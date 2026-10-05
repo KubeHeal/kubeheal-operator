@@ -78,6 +78,12 @@ help: ## Display this help.
 
 ##@ Build
 
+.PHONY: test
+test: ## Run chart linting and template rendering tests.
+	helm lint helm-charts/self-healing-platform/
+	helm template test-release helm-charts/self-healing-platform/ > /dev/null
+	@echo "All tests passed."
+
 .PHONY: run
 run: helm-operator ## Run against the configured Kubernetes cluster in ~/.kube/config
 	$(HELM_OPERATOR) run

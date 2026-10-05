@@ -208,7 +208,7 @@ rules:
 
 # Jupyter Notebook Validator
 - apiGroups:
-  - kubeheal.io
+  - mlops.mlops.dev
   resources:
   - notebookvalidationjobs
   verbs:
