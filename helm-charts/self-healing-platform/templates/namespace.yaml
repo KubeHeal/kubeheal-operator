@@ -9,6 +9,7 @@ metadata:
     {{- with .Values.namespace.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    app.kubernetes.io/managed-by: Helm
     argocd.argoproj.io/instance: hub-gitops
     argocd.argoproj.io/managed-by: hub-gitops
     kubernetes.io/metadata.name: {{ .Values.namespace.name | default .Values.main.namespace }}
@@ -16,5 +17,7 @@ metadata:
     {{- with .Values.namespace.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
     argocd.argoproj.io/sync-wave: "-1"
 {{- end }}

@@ -318,9 +318,11 @@ spec:
           verbs:
           - '*'
         - apiGroups:
-          - kubeheal.io
+          - mlops.mlops.dev
           resources:
           - notebookvalidationjobs
+          - notebookvalidationjobs/status
+          - notebookvalidationjobs/finalizers
           verbs:
           - '*'
         - apiGroups:
@@ -351,6 +353,16 @@ spec:
           - '*'
         - apiGroups:
           - operator.openshift.io
+          resources:
+          - consoles
+          verbs:
+          - get
+          - list
+          - watch
+          - patch
+          - update
+        - apiGroups:
+          - config.openshift.io
           resources:
           - consoles
           verbs:

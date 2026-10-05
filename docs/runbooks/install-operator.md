@@ -691,6 +691,160 @@ every 60 seconds and creates the resources automatically.
 
 ---
 
+### Issue 5: Console "cluster" Ownership Conflict
+
+**Symptoms**: Operator logs show an error like:
+
+```
+cannot patch "cluster" with kind Console: ... is invalid:
+metadata.resourceVersion: Invalid value
+```
+
+or the Helm reconciliation fails with:
+
+```
+rendered manifests contain a resource that already exists. Unable to continue
+with install: Console "cluster" in namespace "" exists and cannot be imported
+```
+
+**Root Cause**: The Helm chart includes a `Console` resource
+(`operator.openshift.io/v1 Console "cluster"`) that registers console plugins.
+This is a cluster singleton that already exists on every OpenShift cluster. Helm
+refuses to manage resources it did not create unless they carry the correct
+ownership labels.
+
+**Solution** (Operator v0.1.11+): The default values now set
+`consolePlugins.enabled: false`, which skips Console rendering entirely.
+
+If you are running v0.1.10 or earlier, patch the CR:
+
+```bash
+oc patch selfhealingplatform kubeheal -n kubeheal-system --type merge \
+  -p '{"spec":{"consolePlugins":{"enabled":false}}}'
+```
+
+Or label the existing Console for Helm adoption:
+
+```bash
+RELEASE_NAME=$(oc get selfhealingplatform kubeheal -n kubeheal-system \
+  -o jsonpath='{.status.deployedRelease.name}' 2>/dev/null || echo "kubeheal")
+
+oc label consoles.operator.openshift.io cluster \
+  app.kubernetes.io/managed-by=Helm --overwrite
+oc annotate consoles.operator.openshift.io cluster \
+  meta.helm.sh/release-name=$RELEASE_NAME \
+  meta.helm.sh/release-namespace=kubeheal-system --overwrite
+```
+
+---
+
+### Issue 6: Namespace Ownership Conflict
+
+**Symptoms**: Operator logs show:
+
+```
+rendered manifests contain a resource that already exists. Unable to continue
+with install: Namespace "self-healing-platform" exists and cannot be imported
+```
+
+**Root Cause**: The namespace `self-healing-platform` was created before the
+operator deployed (e.g., by an Ansible prerequisite playbook, manual `oc create`,
+or a previous install). Helm refuses to adopt pre-existing namespaces.
+
+**Solution** (Operator v0.1.11+): The default values now set
+`namespace.create: false`, which skips namespace creation entirely.
+
+If you are running v0.1.10 or earlier, patch the CR:
+
+```bash
+oc patch selfhealingplatform kubeheal -n kubeheal-system --type merge \
+  -p '{"spec":{"namespace":{"create":false}}}'
+```
+
+Or label the existing namespace for Helm adoption:
+
+```bash
+RELEASE_NAME=$(oc get selfhealingplatform kubeheal -n kubeheal-system \
+  -o jsonpath='{.status.deployedRelease.name}' 2>/dev/null || echo "kubeheal")
+
+oc label namespace self-healing-platform \
+  app.kubernetes.io/managed-by=Helm --overwrite
+oc annotate namespace self-healing-platform \
+  meta.helm.sh/release-name=$RELEASE_NAME \
+  meta.helm.sh/release-namespace=kubeheal-system --overwrite
+```
+
+---
+
+### Issue 7: RBAC Forbidden for NotebookValidationJob or Other CRDs
+
+**Symptoms**: Operator logs show:
+
+```
+is forbidden: User "system:serviceaccount:kubeheal-system:kubeheal-operator-controller-manager"
+cannot create resource "notebookvalidationjobs" in API group "mlops.mlops.dev"
+```
+
+**Root Cause**: In operator v0.1.10, the CSV ClusterRole listed the wrong API
+group (`kubeheal.io`) for `NotebookValidationJob` resources instead of the correct
+group (`mlops.mlops.dev`). This caused the operator ServiceAccount to lack RBAC
+permissions for those resources.
+
+**Solution** (Operator v0.1.11+): The CSV now references `mlops.mlops.dev`
+correctly. Upgrade to the latest operator version.
+
+If you cannot upgrade immediately, grant the operator cluster-admin as a temporary
+workaround:
+
+```bash
+oc adm policy add-cluster-role-to-user cluster-admin \
+  system:serviceaccount:kubeheal-system:kubeheal-operator-controller-manager
+
+# Force the operator to pick up the new permissions
+oc delete pod -n kubeheal-system -l control-plane=controller-manager --force
+```
+
+> ⚠️ **Warning**: Granting cluster-admin is a broad permission. Remove it after
+> upgrading to v0.1.11+:
+> ```bash
+> oc adm policy remove-cluster-role-from-user cluster-admin \
+>   system:serviceaccount:kubeheal-system:kubeheal-operator-controller-manager
+> ```
+
+---
+
+### Issue 8: Helm "name still in use" After CR Recreate
+
+**Symptoms**: After deleting and recreating the `SelfHealingPlatform` CR, the
+operator logs show:
+
+```
+cannot re-use a name that is still in use
+```
+
+**Root Cause**: Helm release records are stored as Secrets in the operator
+namespace. If the old release was not fully cleaned up before creating a new CR,
+Helm detects the stale release.
+
+**Solution**: Wait 60-90 seconds for the operator to clean up. If the error
+persists, manually delete the stale Helm release secret:
+
+```bash
+# List Helm release secrets
+oc get secrets -n kubeheal-system | grep "sh.helm.release"
+
+# Delete the stale release (replace <name> with the release name from above)
+oc delete secret -n kubeheal-system -l name=<release-name>,owner=helm
+```
+
+Then recreate the CR:
+
+```bash
+oc apply -f config/samples/aiops_v1alpha1_selfhealingplatform.yaml
+```
+
+---
+
 ### Escalation Path
 
 | Severity | First Contact | Response Time |

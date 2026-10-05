@@ -211,6 +211,8 @@ rules:
   - mlops.mlops.dev
   resources:
   - notebookvalidationjobs
+  - notebookvalidationjobs/status
+  - notebookvalidationjobs/finalizers
   verbs:
   - "*"
 
@@ -251,6 +253,18 @@ rules:
 # OpenShift Console operator (register plugins)
 - apiGroups:
   - operator.openshift.io
+  resources:
+  - consoles
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+  - update
+
+# OpenShift Console config (read cluster console config)
+- apiGroups:
+  - config.openshift.io
   resources:
   - consoles
   verbs:

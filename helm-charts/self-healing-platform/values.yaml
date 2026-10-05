@@ -1,6 +1,14 @@
 # Self-Healing Platform - Hub Cluster Helm Chart Values
 # This file contains default values for the hub cluster deployment
 
+# Console plugins configuration
+# Controls whether the Console "cluster" resource is managed by Helm.
+# IMPORTANT: Must be false for operator-based installs because the Console
+# singleton already exists and Helm cannot adopt it.
+# Only set to true for ArgoCD installs that use ServerSideApply.
+consolePlugins:
+  enabled: false
+
 # Cluster topology (overridden by values-hub.yaml)
 # "ha" = HighlyAvailable multi-node (CephFS on ODF nodes, gp3-csi on GPU nodes)
 # "sno" = Single Node OpenShift (gp3-csi + NooBaa only, no CephFS)
@@ -82,7 +90,11 @@ imageBuilds:
 # Namespace configuration
 namespace:
   # Create namespace
-  create: true
+  # IMPORTANT: Set to false for operator-based installs. The operator deploys
+  # into a pre-existing namespace and Helm cannot adopt an existing namespace
+  # without the correct ownership labels/annotations.
+  # Set to true only for fresh ArgoCD installs where the namespace doesn't exist yet.
+  create: false
 
   # Namespace name
   name: self-healing-platform

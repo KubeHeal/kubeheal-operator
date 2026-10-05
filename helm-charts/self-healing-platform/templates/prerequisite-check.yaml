@@ -1,0 +1,174 @@
+{{- /*
+  Prerequisite Check ConfigMap and Hook Job
+  Reports which prerequisite operator CRDs are present and which are missing.
+  This helps operators surface prerequisite-missing warnings instead of silently
+  skipping gated resources when showing Deployed=True.
+*/ -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prerequisite-check-report
+  namespace: {{ .Values.main.namespace | default "self-healing-platform" }}
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prerequisite-check
+  annotations:
+    argocd.argoproj.io/sync-wave: "99"
+data:
+  {{- $missing := list }}
+  {{- $present := list }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "inferenceservices.serving.kserve.io" }}
+  {{- $present = append $present "KServe (serving.kserve.io)" }}
+  {{- else }}
+  {{- $missing = append $missing "KServe (serving.kserve.io) — install Red Hat OpenShift AI" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "pipelines.tekton.dev" }}
+  {{- $present = append $present "Tekton Pipelines (tekton.dev)" }}
+  {{- else }}
+  {{- $missing = append $missing "Tekton Pipelines (tekton.dev) — install OpenShift Pipelines" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "notebookvalidationjobs.mlops.mlops.dev" }}
+  {{- $present = append $present "Jupyter Notebook Validator (mlops.mlops.dev)" }}
+  {{- else }}
+  {{- $missing = append $missing "Jupyter Notebook Validator (mlops.mlops.dev) — install jupyter-notebook-validator-operator" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "notebooks.kubeflow.org" }}
+  {{- $present = append $present "Kubeflow Notebooks (kubeflow.org)" }}
+  {{- else }}
+  {{- $missing = append $missing "Kubeflow Notebooks (kubeflow.org) — install Red Hat OpenShift AI" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "datascienceclusters.datasciencecluster.opendatahub.io" }}
+  {{- $present = append $present "DataScienceCluster (opendatahub.io)" }}
+  {{- else }}
+  {{- $missing = append $missing "DataScienceCluster (opendatahub.io) — install Red Hat OpenShift AI" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "externalsecrets.external-secrets.io" }}
+  {{- $present = append $present "External Secrets (external-secrets.io)" }}
+  {{- else }}
+  {{- $missing = append $missing "External Secrets (external-secrets.io) — install External Secrets Operator" }}
+  {{- end }}
+  {{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "servicemonitors.monitoring.coreos.com" }}
+  {{- $present = append $present "Prometheus Operator (monitoring.coreos.com)" }}
+  {{- else }}
+  {{- $missing = append $missing "Prometheus Operator (monitoring.coreos.com) — usually pre-installed on OpenShift" }}
+  {{- end }}
+  status: |
+    Prerequisite Check Report
+    =========================
+    Generated: {{ now | date "2006-01-02T15:04:05Z" }}
+
+    Present ({{ len $present }}):
+    {{- range $present }}
+      ✅ {{ . }}
+    {{- end }}
+    {{- if $missing }}
+
+    MISSING ({{ len $missing }}):
+    {{- range $missing }}
+      ❌ {{ . }}
+    {{- end }}
+
+    ⚠️  WARNING: {{ len $missing }} prerequisite operator(s) not found.
+    Resources gated on these CRDs (InferenceServices, Pipelines, Notebooks, etc.)
+    will NOT be created until the prerequisite operators are installed.
+    The CR may show Deployed=True but the platform is NOT fully functional.
+
+    Action: Install the missing operators and wait ~60 seconds for the
+    Helm chart to reconcile and create the gated resources.
+    {{- else }}
+
+    ✅ All prerequisite operators are installed.
+    {{- end }}
+  missing_count: "{{ len $missing }}"
+  present_count: "{{ len $present }}"
+  {{- if $missing }}
+  missing_operators: |
+    {{- range $missing }}
+    {{ . }}
+    {{- end }}
+  {{- end }}
+---
+{{- /*
+  Post-install/post-upgrade hook: prints prerequisite status to operator logs
+  so users see warnings when running `oc logs` on the operator pod.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prerequisite-check-{{ now | date "20060102150405" }}
+  namespace: {{ .Values.main.namespace | default "self-healing-platform" }}
+  labels:
+    {{- include "self-healing-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prerequisite-check
+  annotations:
+    argocd.argoproj.io/sync-wave: "99"
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ .Values.rbac.serviceAccountName | default "self-healing-operator" }}
+      containers:
+        - name: check
+          image: registry.redhat.io/openshift4/ose-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "========================================"
+              echo "  KubeHeal Prerequisite Check"
+              echo "========================================"
+              echo ""
+              MISSING=0
+              check_crd() {
+                local crd=$1 label=$2 install=$3
+                if oc get crd "$crd" >/dev/null 2>&1; then
+                  echo "✅ $label"
+                else
+                  echo "❌ $label — $install"
+                  MISSING=$((MISSING + 1))
+                fi
+              }
+              check_crd "inferenceservices.serving.kserve.io" \
+                "KServe (serving.kserve.io)" \
+                "Install Red Hat OpenShift AI"
+              check_crd "pipelines.tekton.dev" \
+                "Tekton Pipelines (tekton.dev)" \
+                "Install OpenShift Pipelines"
+              check_crd "notebookvalidationjobs.mlops.mlops.dev" \
+                "Jupyter Notebook Validator (mlops.mlops.dev)" \
+                "Install jupyter-notebook-validator-operator"
+              check_crd "notebooks.kubeflow.org" \
+                "Kubeflow Notebooks (kubeflow.org)" \
+                "Install Red Hat OpenShift AI"
+              check_crd "datascienceclusters.datasciencecluster.opendatahub.io" \
+                "DataScienceCluster (opendatahub.io)" \
+                "Install Red Hat OpenShift AI"
+              check_crd "externalsecrets.external-secrets.io" \
+                "External Secrets (external-secrets.io)" \
+                "Install External Secrets Operator"
+              check_crd "servicemonitors.monitoring.coreos.com" \
+                "Prometheus Operator (monitoring.coreos.com)" \
+                "Usually pre-installed on OpenShift"
+              echo ""
+              if [ "$MISSING" -gt 0 ]; then
+                echo "⚠️  WARNING: $MISSING prerequisite operator(s) not found."
+                echo "Gated resources will not be created until they are installed."
+                echo ""
+                echo "See: oc get configmap prerequisite-check-report -n {{ .Values.main.namespace | default "self-healing-platform" }} -o jsonpath='{.data.status}'"
+              else
+                echo "✅ All prerequisite operators are installed."
+              fi
+              echo ""
+              echo "========================================"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
