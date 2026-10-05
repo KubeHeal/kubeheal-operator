@@ -132,11 +132,121 @@ which gives ~50% headroom above the base platform load.
 ### Required Tools
 
 - [ ] `oc` CLI 4.20 or later
+- [ ] `aws` CLI v2 (for ROSA / AWS deployments)
+- [ ] `rosa` CLI (for ROSA cluster provisioning)
+- [ ] `ocm` CLI (recommended for OCM account management and debugging)
 
 **Verify tool installation**:
 
 ```bash
 oc version --client
+aws --version
+rosa version
+ocm version          # recommended, not strictly required
+```
+
+**Install `ocm` CLI** (if not present):
+
+```bash
+curl -Lo ocm https://github.com/openshift-online/ocm-cli/releases/latest/download/ocm-linux-amd64
+chmod +x ocm && sudo mv ocm /usr/local/bin/
+ocm login --token="<your-offline-token>"
+# Get token from: https://console.redhat.com/openshift/token
+```
+
+### MANDATORY: OCM Role Linked to AWS Account (ROSA Only)
+
+As of **October 1, 2026**, Red Hat requires an OCM (OpenShift Cluster Manager) Role
+linked to your AWS account for all ROSA clusters (Classic and HCP). Without this,
+cluster creation and management will fail.
+
+Reference: https://access.redhat.com/articles/7137057
+
+**Check if you already have one:**
+
+```bash
+rosa whoami
+# Look for: AWS Account ID and OCM Organization ID
+
+rosa list ocm-role
+# Must show LINKED = Yes for your AWS account
+```
+
+**If no OCM Role exists or it is not linked:**
+
+```bash
+rosa create ocm-role --mode auto
+rosa link ocm-role --role-arn <your_ocm_role_arn>
+
+# Verify
+rosa list ocm-role
+# Confirm: LINKED column shows "Yes"
+```
+
+This is a one-time setup per AWS account / Red Hat organization pair.
+
+### AWS IAM Permissions (ROSA Only)
+
+The user running the provisioning script needs an IAM identity with these permissions:
+
+**For ROSA cluster creation** (managed by `rosa` CLI + STS):
+- `rosa` CLI handles STS role creation automatically with `--mode=auto`
+- The calling identity needs `iam:CreateRole`, `iam:AttachRolePolicy`,
+  `iam:CreateOpenIDConnectProvider`, and the standard
+  [ROSA STS permissions](https://docs.openshift.com/rosa/rosa_planning/rosa-sts-aws-prereqs.html)
+- Easiest path: use an IAM user/role with `AdministratorAccess` for initial setup
+
+**For S3 bucket creation** (the `--create-bucket` flag):
+- `s3:CreateBucket`, `s3:PutBucketVersioning`, `s3:PutPublicAccessBlock`, `s3:ListBucket`
+- `iam:CreateUser`, `iam:CreatePolicy`, `iam:AttachUserPolicy`, `iam:CreateAccessKey`
+
+**Minimum scoped IAM policy** (if `AdministratorAccess` is not available):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3BucketManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket", "s3:PutBucketVersioning",
+        "s3:PutPublicAccessBlock", "s3:ListBucket",
+        "s3:GetBucketLocation", "s3:GetObject",
+        "s3:PutObject", "s3:DeleteObject"
+      ],
+      "Resource": ["arn:aws:s3:::aiops-*", "arn:aws:s3:::aiops-*/*"]
+    },
+    {
+      "Sid": "IAMServiceAccountForS3",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateUser", "iam:CreatePolicy",
+        "iam:AttachUserPolicy", "iam:CreateAccessKey",
+        "iam:ListAccessKeys", "iam:GetUser"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:user/kubeheal-*",
+        "arn:aws:iam::*:policy/kubeheal-*"
+      ]
+    },
+    {
+      "Sid": "STSIdentity",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Pre-flight verification:**
+
+```bash
+aws sts get-caller-identity
+rosa whoami
+rosa list ocm-role            # Must show LINKED = Yes
+rosa verify quota --region us-east-1
 ```
 
 ### Decide Your Configuration
